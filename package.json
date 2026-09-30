@@ -7,20 +7,29 @@
     "node": ">=22"
   },
   "scripts": {
-    "vendor": "node -e \"const fs=require('fs');fs.mkdirSync('public/js/vendor',{recursive:true});fs.copyFileSync('node_modules/jsqr/dist/jsQR.js','public/js/vendor/jsQR.js')\"",
-    "build": "npm run vendor && tsc -p tsconfig.client.json && tsc -p tsconfig.json",
-    "dev": "npm run vendor && tsc -p tsconfig.client.json && tsc -p tsconfig.dev.json && node --env-file-if-exists=.env .dev/scripts/dev-server.js",
+    "dev": "next dev -p 8787",
+    "build": "next build",
+    "start": "next start -p 8787",
+    "lint": "eslint",
     "staff": "node --env-file-if-exists=.env scripts/staff.mjs",
     "db:start": "supabase start -x studio,imgproxy,realtime,storage-api,edge-runtime,logflare,vector,supavisor,mailpit,postgres-meta",
     "db:stop": "supabase stop"
   },
   "dependencies": {
     "jsqr": "^1.4.0",
-    "qrcode": "^1.5.4"
+    "next": "16.3.3",
+    "qrcode": "^1.5.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
     "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.3",
     "supabase": "^2.118.0",
     "typescript": "^5.9.3"
   }

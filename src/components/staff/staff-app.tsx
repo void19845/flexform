@@ -1,0 +1,327 @@
+"use client";
+
+import jsQR from "jsqr";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { AccountLoginForm } from "@/components/account-login-form";
+import { currentAccount, signOut } from "@/lib/client/account";
+import { isAuthError, post } from "@/lib/client/api";
+import { dateTimeFmt, formatCode } from "@/lib/client/format";
+import type { RewardCheck } from "@/lib/shared/types";
+
+/** Lecteur de QR intégré au navigateur (Chrome, Android). Absent sur Safari : on passe alors par jsQR. */
+interface QrDetector {
+  detect(source: CanvasImageSource): Promise<{ rawValue: string }[]>;
+}
+type DetectorClass = new (options: { formats: string[] }) => QrDetector;
+
+/** Écran affiché. pending : code scanné, vérifié dès l'ouverture du scanner ; message : erreur de connexion à afficher. */
+type View = { name: "login"; pending: string; message: string } | { name: "scanner"; pending: string };
+
+export function StaffApp() {
+  const [view, setView] = useState<View | null>(null);
+
+  useEffect(() => {
+    // Code reçu dans l'adresse quand le QR a été scanné avec l'appareil photo du téléphone
+    const url = new URL(location.href);
+    const pending = url.searchParams.get("code") ?? "";
+    // Admin et staff ont accès à cette page
+    void currentAccount()
+      .catch(() => null)
+      .then((account) => {
+        // Code retiré de l'adresse après cette attente : le routeur de Next.js suit alors le changement,
+        // et le double lancement de l'effet en développement lit deux fois le même code.
+        if (pending) history.replaceState(null, "", url.pathname);
+        setView(account ? { name: "scanner", pending } : { name: "login", pending, message: "" });
+      });
+  }, []);
+
+  if (!view) return null;
+  if (view.name === "login") {
+    return (
+      <AccountLoginForm
+        key={view.message}
+        eyebrow="BDE Montreuil · Staff"
+        title="Remise des récompenses"
+        intro={view.pending ? "Connecte-toi pour vérifier le QR code scanné." : undefined}
+        message={view.message}
+        onSignedIn={() => setView({ name: "scanner", pending: view.pending })}
+      />
+    );
+  }
+  return (
+    <Scanner
+      pending={view.pending}
+      onSignedOut={() => setView({ name: "login", pending: "", message: "" })}
+      onUnauthorized={(code, message) => setView({ name: "login", pending: code, message })}
+    />
+  );
+}
+
+// --- Scanner --------------------------------------------------------------
+
+const AIM_HINT = "Vise le QR code affiché sur le téléphone du participant.";
+
+/** Zone de résultat : vérification en cours, erreur, ou réponse du serveur (redeeming : validation en cours d'envoi). */
+type Result = { kind: "checking" } | { kind: "error"; message: string } | { kind: "reward"; r: RewardCheck; redeeming?: boolean };
+
+function Scanner({
+  pending,
+  onSignedOut,
+  onUnauthorized,
+}: {
+  pending: string;
+  onSignedOut: () => void;
+  onUnauthorized: (code: string, message: string) => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  /** Scan en pause pendant l'affichage d'un résultat, pour ne pas relire le même code en boucle */
+  const paused = useRef(pending !== "");
+  /** starting : en attente de l'accès à la caméra ; on : image affichée et scan en cours */
+  const [camera, setCamera] = useState<"off" | "starting" | "on">("off");
+  const [hint, setHint] = useState(AIM_HINT);
+  // Code reçu dans l'adresse : « Vérification… » dès l'ouverture du scanner
+  const [result, setResult] = useState<Result | null>(pending ? { kind: "checking" } : null);
+  const [input, setInput] = useState("");
+
+  function toggleCamera(): void {
+    if (camera === "on") setCamera("off");
+    else if (!navigator.mediaDevices?.getUserMedia) {
+      setHint("Caméra indisponible ici (il faut une adresse en https). Utilise la saisie manuelle.");
+    } else setCamera("starting");
+  }
+
+  function logout(): void {
+    setCamera("off");
+    void signOut().then(onSignedOut);
+  }
+
+  function next(): void {
+    paused.current = false;
+    setInput("");
+    setResult(null);
+  }
+
+  async function check(code: string): Promise<void> {
+    paused.current = true;
+    setResult({ kind: "checking" });
+    await verify(code);
+  }
+
+  /** Envoie le code au serveur et affiche sa réponse (« Vérification… » est déjà affiché). */
+  async function verify(code: string): Promise<void> {
+    try {
+      setResult({ kind: "reward", r: await post<RewardCheck>("/api/staff/check", { code }) });
+    } catch (err) {
+      failed(err, code);
+    }
+  }
+
+  async function redeem(r: RewardCheck): Promise<void> {
+    setResult({ kind: "reward", r, redeeming: true });
+    try {
+      setResult({ kind: "reward", r: await post<RewardCheck>("/api/staff/redeem", { code: r.code }) });
+    } catch (err) {
+      failed(err, r.code);
+    }
+  }
+
+  /**
+   * Session expirée ou accès retiré : retour à la connexion, en gardant le code à vérifier.
+   * La caméra s'arrête avec le démontage du scanner.
+   */
+  function failed(err: unknown, code: string): void {
+    if (isAuthError(err)) onUnauthorized(code, err.message);
+    else setResult({ kind: "error", message: (err as Error).message });
+  }
+
+  // L'état initial affiche déjà « Vérification… » : l'effet n'a plus qu'à attendre la réponse du serveur
+  const verifyPending = useEffectEvent(() => {
+    if (pending) void verify(pending);
+  });
+  useEffect(() => {
+    verifyPending();
+  }, []);
+
+  const onScan = useEffectEvent((text: string) => {
+    navigator.vibrate?.(80);
+    return check(text);
+  });
+
+  // Caméra allumée : flux vidéo, puis lecture d'une image toutes les 200 ms. Tout s'arrête quand la caméra
+  // est coupée (bouton, déconnexion) ou quand le scanner disparaît.
+  const cameraWanted = camera !== "off";
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!cameraWanted || !video) return;
+    const canvas = document.createElement("canvas");
+    const Detector = (window as unknown as { BarcodeDetector?: DetectorClass }).BarcodeDetector;
+    const detector = Detector ? new Detector({ formats: ["qr_code"] }) : null;
+    let stream: MediaStream | null = null;
+    let timer: number | undefined;
+    let stopped = false;
+
+    async function scan(): Promise<void> {
+      if (!paused.current) {
+        const text = await readFrame(video!, canvas, detector);
+        if (text && !paused.current && !stopped) await onScan(text);
+      }
+      if (!stopped) timer = window.setTimeout(scan, 200);
+    }
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false }).then(
+      async (s) => {
+        // Caméra coupée pendant la demande d'accès
+        if (stopped) return s.getTracks().forEach((t) => t.stop());
+        stream = s;
+        video.srcObject = s;
+        setCamera("on");
+        setHint(AIM_HINT);
+        await video.play().catch(() => undefined);
+        if (!stopped) timer = window.setTimeout(scan, 200);
+      },
+      () => {
+        if (stopped) return;
+        setHint("Accès à la caméra refusé. Autorise-la dans le navigateur, ou utilise la saisie manuelle.");
+        setCamera("off");
+      },
+    );
+
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      stream?.getTracks().forEach((t) => t.stop());
+      video.srcObject = null;
+    };
+  }, [cameraWanted]);
+
+  return (
+    <>
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">BDE Montreuil · Staff</p>
+          <h1>Remise des récompenses</h1>
+        </div>
+        <button type="button" className="btn ghost small" onClick={logout}>
+          Déconnexion
+        </button>
+      </header>
+      <div className="card scanner">
+        <div className="video-box">
+          <video ref={videoRef} playsInline muted autoPlay hidden={camera !== "on"} />
+        </div>
+        <button type="button" className={camera === "on" ? "btn ghost big" : "btn primary big"} onClick={toggleCamera}>
+          {camera === "on" ? "Arrêter la caméra" : "Activer la caméra"}
+        </button>
+        <p className="muted small">{hint}</p>
+      </div>
+      <section className="scan-result" aria-live="polite">
+        {result?.kind === "checking" && (
+          <div className="card result">
+            <p className="muted">Vérification…</p>
+          </div>
+        )}
+        {result?.kind === "error" && (
+          <div className="card result invalid">
+            <h2>Erreur</h2>
+            <p>{result.message}</p>
+            <button type="button" className="btn big" onClick={next}>
+              Réessayer
+            </button>
+          </div>
+        )}
+        {result?.kind === "reward" && (
+          <RewardCard r={result.r} redeeming={!!result.redeeming} onRedeem={() => void redeem(result.r)} onNext={next} />
+        )}
+      </section>
+      <div className="card">
+        <h2>Saisie manuelle</h2>
+        <p className="muted small">Si le scan ne marche pas, tape le code écrit sous le QR.</p>
+        <form
+          className="manual"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (input.trim()) void check(input);
+          }}
+        >
+          <input
+            type="text"
+            placeholder="ABCD-EFGH-JKLM"
+            autoComplete="off"
+            aria-label="Code de la récompense"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+          />
+          <button type="submit" className="btn">
+            Vérifier
+          </button>
+        </form>
+      </div>
+    </>
+  );
+}
+
+const TITLES: Record<RewardCheck["status"], string> = {
+  valid: "Récompense valide",
+  done: "Remise validée",
+  used: "Déjà utilisée",
+  invalid: "Code invalide",
+};
+
+/** Réponse du serveur pour un code : récompense, personne, sondage, et les boutons pour valider ou passer au suivant. */
+function RewardCard({
+  r,
+  redeeming,
+  onRedeem,
+  onNext,
+}: {
+  r: RewardCheck;
+  redeeming: boolean;
+  onRedeem: () => void;
+  onNext: () => void;
+}) {
+  const person = r.person && (r.person.prenom || r.person.nom || r.person.pseudo) ? r.person : null;
+  return (
+    <div className={`card result ${r.status}`}>
+      <h2>{TITLES[r.status]}</h2>
+      {r.reward && <p className="reward-text">{r.reward}</p>}
+      {person && (
+        <p className="person">
+          <strong>{[person.prenom, person.nom.toUpperCase()].filter(Boolean).join(" ") || person.pseudo}</strong>
+          <span className="muted">{[person.formation, person.pseudo && `@${person.pseudo}`].filter(Boolean).join(" · ")}</span>
+        </p>
+      )}
+      {r.question && <p className="muted small">{`Sondage : ${r.question}`}</p>}
+      {r.status === "used" && r.redeemedAt ? (
+        <p>{`Remise le ${dateTimeFmt.format(r.redeemedAt)}. Ne pas la redonner.`}</p>
+      ) : null}
+      {r.message && <p>{r.message}</p>}
+      <p className="muted small code">{formatCode(r.code)}</p>
+      {r.status === "valid" && (
+        <button type="button" className="btn primary big" disabled={redeeming} onClick={onRedeem}>
+          Valider la remise
+        </button>
+      )}
+      <button type="button" className={r.status === "valid" ? "btn ghost big" : "btn big"} onClick={onNext}>
+        {r.status === "valid" ? "Annuler" : "Scanner le suivant"}
+      </button>
+    </div>
+  );
+}
+
+/** Lit le QR code de l'image affichée par la caméra, ou null s'il n'y en a pas. */
+async function readFrame(video: HTMLVideoElement, canvas: HTMLCanvasElement, detector: QrDetector | null): Promise<string | null> {
+  if (video.readyState < 2 || !video.videoWidth) return null;
+  if (detector) {
+    const codes = await detector.detect(video).catch(() => []);
+    return codes[0]?.rawValue ?? null;
+  }
+  // Image réduite : jsQR est bien plus rapide et lit toujours un QR affiché sur un écran
+  const scale = Math.min(1, 640 / video.videoWidth);
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  return jsQR(data, width, height)?.data ?? null;
+}
