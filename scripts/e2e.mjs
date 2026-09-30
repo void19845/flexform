@@ -1,0 +1,165 @@
+/**
+ * Test de bout en bout contre une base Supabase LOCALE (npm run db:start) et l'appli lancée en local.
+ * Vérifie les parcours (votant, admin, staff) et la sécurité par ligne en interrogeant la base
+ * directement avec chaque rôle. Ne jamais lancer contre la base de production : il crée et supprime des données.
+ *
+ *   node --env-file=.env scripts/e2e.mjs [adresse de l'appli, défaut http://localhost:8787]
+ */
+const APP = process.argv[2] ?? "http://localhost:8787";
+const { SUPABASE_URL: SB, SUPABASE_ANON_KEY: ANON, SUPABASE_SERVICE_ROLE_KEY: SERVICE } = process.env;
+if (!SB?.includes("127.0.0.1") && !SB?.includes("localhost")) {
+  console.error("Refusé : SUPABASE_URL ne pointe pas vers une base locale.");
+  process.exit(1);
+}
+
+let failures = 0;
+function check(label, ok, detail = "") {
+  if (!ok) failures++;
+  console.log(`${ok ? "ok  " : "FAIL"} ${label}${!ok && detail ? ` -> ${detail}` : ""}`);
+}
+
+/** Client HTTP avec ses propres cookies, comme un navigateur. */
+function browser() {
+  const jar = new Map();
+  return async (path, { method = "GET", body } = {}) => {
+    const res = await fetch(APP + path, {
+      method,
+      headers: { "Content-Type": "application/json", cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; ") },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    for (const c of res.headers.getSetCookie()) {
+      const [pair] = c.split(";");
+      const [k, ...v] = pair.split("=");
+      if (/Max-Age=0/.test(c)) jar.delete(k);
+      else jar.set(k, v.join("="));
+    }
+    const data = res.headers.get("content-type")?.includes("json") ? await res.json() : await res.text();
+    return { status: res.status, data };
+  };
+}
+
+/** Accès direct à la base (PostgREST) avec une clé ou un jeton donné. */
+async function rest(bearer, path, { method = "GET", body, prefer } = {}) {
+  const res = await fetch(`${SB}/rest/v1/${path}`, {
+    method,
+    headers: {
+      apikey: ANON,
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+      ...(prefer ? { Prefer: prefer } : {}),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  return { status: res.status, data: text ? JSON.parse(text) : null };
+}
+
+async function token(email, password) {
+  const res = await fetch(`${SB}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { apikey: ANON, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  return (await res.json()).access_token;
+}
+
+// Base propre : on retire les votants et les codes des tests précédents, et on remet les sondages en brouillon
+await rest(SERVICE, "sondage_participants?id=not.is.null", { method: "DELETE" });
+await rest(SERVICE, "sondage_polls?id=not.is.null", { method: "PATCH", body: { status: "draft", hub: false, reward: "", reveal: false, published_at: null } });
+await rest(SERVICE, "sondage_settings?id=eq.1", { method: "PATCH", body: { active_poll_id: null, theme_linked: true } });
+await rest(SERVICE, "sondage_rate_limits?key=not.is.null", { method: "DELETE" });
+
+console.log("\n# Votants");
+const lea = browser();
+const tom = browser();
+const profile = { prenom: "Léa", nom: "Martin", formation: "BUT Info 2", pseudo: "lea" };
+check("inscription refusée sans la politique", (await lea("/api/login", { method: "POST", body: profile })).status === 400);
+check("inscription avec consentement", (await lea("/api/login", { method: "POST", body: { ...profile, privacy: true, sponsors: true } })).status === 200);
+check("pseudo déjà pris (casse différente)", (await tom("/api/login", { method: "POST", body: { ...profile, pseudo: "LEA", privacy: true } })).status === 409);
+check("autre votant", (await tom("/api/login", { method: "POST", body: { prenom: "Tom", nom: "Petit", formation: "GEA", pseudo: "tom", privacy: true } })).status === 200);
+check("vote refusé tant que rien n'est ouvert", (await lea("/api/vote", { method: "POST", body: { pollId: "ag-roles", value: "0" } })).status === 409);
+
+console.log("\n# Comptes admin et staff");
+const admin = browser();
+const staff = browser();
+check("mauvais mot de passe refusé", (await admin("/api/auth/login", { method: "POST", body: { email: process.env.TEST_ADMIN_EMAIL, password: "nope" } })).status === 401);
+const adminLogin = await admin("/api/auth/login", { method: "POST", body: { email: process.env.TEST_ADMIN_EMAIL, password: process.env.TEST_ADMIN_PASSWORD } });
+check("connexion admin", adminLogin.status === 200 && adminLogin.data.role === "admin", JSON.stringify(adminLogin.data));
+const staffLogin = await staff("/api/auth/login", { method: "POST", body: { email: process.env.TEST_STAFF_EMAIL, password: process.env.TEST_STAFF_PASSWORD } });
+check("connexion staff", staffLogin.status === 200 && staffLogin.data.role === "staff", JSON.stringify(staffLogin.data));
+check("un votant n'accède pas à l'admin", (await lea("/api/admin/state")).status === 401);
+check("le staff n'accède pas à l'admin", (await staff("/api/admin/state")).status === 403);
+check("le staff ne peut pas lancer un sondage", (await staff("/api/admin/action", { method: "POST", body: { id: "ag-roles", action: "open" } })).status === 403);
+
+console.log("\n# Sondages");
+const state0 = await admin("/api/admin/state");
+check("l'admin voit les 6 sondages de l'AG", state0.data.polls?.length === 6, JSON.stringify(state0.data).slice(0, 200));
+check("hub + récompense", (await admin("/api/admin/action", { method: "POST", body: { id: "ag-roles", action: "hub" } })).status === 200 &&
+  (await admin("/api/admin/reward", { method: "POST", body: { id: "ag-roles", reward: "1 café offert" } })).status === 200);
+check("lancer en direct", (await admin("/api/admin/action", { method: "POST", body: { id: "ag-vote-roles", action: "open" } })).status === 200);
+check("vote hub", (await lea("/api/vote", { method: "POST", body: { pollId: "ag-roles", value: "2" } })).status === 200);
+check("vote direct", (await lea("/api/vote", { method: "POST", body: { pollId: "ag-vote-roles", value: "0" } })).status === 200);
+check("changement d'avis", (await lea("/api/vote", { method: "POST", body: { pollId: "ag-vote-roles", value: "1" } })).status === 200);
+check("choix invalide refusé", (await tom("/api/vote", { method: "POST", body: { pollId: "ag-vote-roles", value: "9" } })).status === 400);
+await tom("/api/vote", { method: "POST", body: { pollId: "ag-vote-roles", value: "0" } });
+const pub = await lea("/api/state");
+check("état votant : direct + hub + récompense", pub.data.poll?.id === "ag-vote-roles" && pub.data.poll.myVote === "1" && pub.data.hub.length === 1 && pub.data.rewards.length === 1, JSON.stringify(pub.data).slice(0, 300));
+const code = pub.data.rewards[0]?.code;
+check("même code au rafraîchissement", (await lea("/api/state")).data.rewards[0]?.code === code);
+check("QR servi au propriétaire seulement", (await lea(`/api/reward-qr?code=${code}`)).status === 200 && (await tom(`/api/reward-qr?code=${code}`)).status === 404);
+const admin1 = await admin("/api/admin/state");
+const votePoll = admin1.data.polls.find((p) => p.id === "ag-vote-roles");
+check("résultats admin", votePoll.results.total === 2 && votePoll.results.counts["1"] === 1, JSON.stringify(votePoll.results));
+check("2 participants actifs", admin1.data.participants.length === 2);
+const board = await lea("/api/leaderboard");
+check("classement + succès", board.data.me?.rank === 1 && board.data.achievements.find((a) => a.id === "first")?.unlocked === true && board.data.achievements.find((a) => a.id === "lightspeed")?.unlocked === true, JSON.stringify(board.data).slice(0, 300));
+const resp = await admin("/api/admin/respondents");
+check("répondants avec consentement", resp.data.respondents.find((r) => r.pseudo === "lea")?.consent?.sponsors === true);
+
+console.log("\n# Récompenses (staff)");
+const checked = await staff("/api/staff/check", { method: "POST", body: { code: `${APP}/staff?code=${code}` } });
+check("scan : valide, avec le nom", checked.data.status === "valid" && checked.data.person?.nom === "Martin", JSON.stringify(checked.data));
+const [a, b] = await Promise.all([
+  staff("/api/staff/redeem", { method: "POST", body: { code } }),
+  admin("/api/staff/redeem", { method: "POST", body: { code: code.toLowerCase().replace(/(.{4})/g, "$1-") } }),
+]);
+check("double validation simultanée : une seule réussit", [a.data.status, b.data.status].sort().join() === "done,used", `${a.data.status} ${b.data.status}`);
+check("code inconnu", (await staff("/api/staff/check", { method: "POST", body: { code: "ZZZZZZZZZZZZ" } })).data.status === "invalid");
+check("succès « Chasseur de récompenses »", (await lea("/api/leaderboard")).data.achievements.find((x) => x.id === "collector")?.unlocked === true);
+
+console.log("\n# Sécurité par ligne (accès direct à la base)");
+const staffJwt = await token(process.env.TEST_STAFF_EMAIL, process.env.TEST_STAFF_PASSWORD);
+const adminJwt = await token(process.env.TEST_ADMIN_EMAIL, process.env.TEST_ADMIN_PASSWORD);
+for (const table of ["sondage_participants", "sondage_votes", "sondage_reward_codes", "sondage_polls", "sondage_settings", "sondage_staff"]) {
+  const r = await rest(ANON, `${table}?select=*`);
+  check(`anon ne lit rien dans ${table}`, r.status === 401 || r.status === 403 || (Array.isArray(r.data) && r.data.length === 0), `${r.status} ${JSON.stringify(r.data).slice(0, 100)}`);
+}
+check("anon ne peut pas s'inscrire directement", (await rest(ANON, "sondage_participants", { method: "POST", body: { pseudo: "pirate" } })).status >= 400);
+check("anon ne peut pas appeler la limitation de débit", (await rest(ANON, "rpc/sondage_hit_rate_limit", { method: "POST", body: { p_key: "x", p_window_seconds: 60 } })).status >= 400);
+const staffPeople = await rest(staffJwt, "sondage_participants?select=pseudo");
+check("le staff ne voit que les personnes avec une récompense", staffPeople.data.length === 1 && staffPeople.data[0].pseudo === "lea", JSON.stringify(staffPeople.data));
+check("le staff ne lit pas les votes", (await rest(staffJwt, "sondage_votes?select=*")).data.length === 0);
+const staffEdit = await rest(staffJwt, "sondage_polls?id=eq.ag-roles", { method: "PATCH", body: { question: "piraté" }, prefer: "return=representation" });
+check("le staff ne modifie pas les sondages", staffEdit.status >= 400 || staffEdit.data.length === 0, JSON.stringify(staffEdit));
+const steal = await rest(staffJwt, `sondage_reward_codes?code=eq.${code}`, { method: "PATCH", body: { participant_id: "00000000-0000-0000-0000-000000000000" } });
+check("le staff ne peut pas réattribuer un code", steal.status >= 400, `${steal.status}`);
+const promote = await rest(staffJwt, "sondage_staff", { method: "POST", body: { user_id: "00000000-0000-0000-0000-000000000000", role: "admin" } });
+check("le staff ne peut pas se donner le rôle admin", promote.status >= 400, `${promote.status}`);
+const own = await rest(staffJwt, "sondage_staff?select=role");
+check("le staff lit seulement sa propre ligne d'équipe", own.data.length === 1 && own.data[0].role === "staff");
+check("l'admin lit tous les votes", (await rest(adminJwt, "sondage_votes?select=*")).data.length === 3);
+check("l'admin lit toute l'équipe", (await rest(adminJwt, "sondage_staff?select=role")).data.length >= 2);
+
+console.log("\n# RGPD et remise à zéro");
+check("remise à zéro : codes annulés", (await admin("/api/admin/action", { method: "POST", body: { id: "ag-roles", action: "reset" } })).status === 200 &&
+  (await staff("/api/staff/check", { method: "POST", body: { code } })).data.status === "invalid");
+const mine = await tom("/api/privacy");
+check("Mes données", mine.status === 200 && mine.data.answers.length === 1 && mine.data.profile.pseudo === "tom");
+check("modifier ses consentements", (await tom("/api/privacy", { method: "POST", body: { marketing: true, sponsors: false } })).data.marketing === true);
+check("effacement", (await tom("/api/privacy", { method: "DELETE" })).status === 200 && (await tom("/api/state")).status === 401);
+check("plus aucune trace en base", (await rest(SERVICE, "sondage_votes?select=participant_id")).data.every((v) => v.participant_id !== mine.data.profile.id) &&
+  (await rest(SERVICE, "sondage_participants?pseudo=eq.tom")).data.length === 0);
+check("déconnexion admin", (await admin("/api/auth/logout", { method: "POST" })).status === 200 && (await admin("/api/admin/state")).status === 401);
+
+console.log(`\n${failures ? `${failures} échec(s)` : "Tout est passé."}`);
+process.exit(failures ? 1 : 0);
