@@ -1,6 +1,7 @@
 node_modules/
-public/js/
-.dev/
+.next/
+next-env.d.ts
+*.tsbuildinfo
 data/
 .vercel/
 .env*
