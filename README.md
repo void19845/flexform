@@ -1,7 +1,9 @@
-# Sondages AG · BDE Montreuil
+# Flexform
 
-Application de sondage pour l'AG, en TypeScript, hébergeable sur Vercel, avec les données dans
-Supabase (le même projet que le portfolio Flexfolio).
+Application de sondages du BDE Montreuil (« Sondages AG · BDE Montreuil » côté participants), en
+TypeScript, hébergeable sur Vercel, avec les données dans Supabase. Fait partie de **Flex Suite** avec
+le portfolio [Flexfolio](https://github.com/void19845/flexfolio) : même projet Supabase, et apparence
+qui peut reprendre la palette et les polices de Flexfolio.
 
 - `/` : les participants entrent prénom, nom, formation et pseudo, et donnent leur consentement RGPD
   (politique obligatoire, communication et sponsors facultatifs). Le sondage lancé en direct apparaît
