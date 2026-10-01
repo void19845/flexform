@@ -10,10 +10,7 @@
     "dev": "next dev -p 8787",
     "build": "next build",
     "start": "next start -p 8787",
-    "lint": "eslint",
-    "staff": "node --env-file-if-exists=.env scripts/staff.mjs",
-    "db:start": "supabase start -x studio,imgproxy,realtime,storage-api,edge-runtime,logflare,vector,supavisor,mailpit,postgres-meta",
-    "db:stop": "supabase stop"
+    "lint": "eslint"
   },
   "dependencies": {
     "jsqr": "^1.4.0",
@@ -30,7 +27,6 @@
     "@types/react-dom": "^19.3.0",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.3",
-    "supabase": "^2.118.0",
     "typescript": "^5.9.3"
   }
 }

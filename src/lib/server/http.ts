@@ -156,7 +156,7 @@ async function roleOf(db: Db): Promise<StaffRole | null> {
   return role === "admin" || role === "staff" ? role : null;
 }
 
-/** Connexion admin / staff. Refusée (sans cookie) si le compte n'a pas de rôle dans sondage_staff. */
+/** Connexion admin / staff. Refusée (sans cookie) si le compte n'a pas de rôle flexform dans app_roles (base Flex Suite). */
 export async function signIn(req: Request, email: string, password: string): Promise<{ role: StaffRole; email: string }> {
   await rateLimit(req, "staff-login", 10);
   const tokens = await authRequest("password", { email, password });
@@ -173,7 +173,7 @@ export function signOut(req: Request): void {
 
 /**
  * Compte connecté avec un des rôles demandés. Le jeton est rafraîchi s'il expire bientôt.
- * Le rôle est relu dans la base à chaque requête : retirer quelqu'un de sondage_staff lui coupe l'accès aussitôt.
+ * Le rôle est relu dans la base à chaque requête : retirer son rôle dans app_roles lui coupe l'accès aussitôt.
  */
 export async function requireRole(req: Request, roles: StaffRole[]): Promise<StaffContext> {
   let access = readCookie(req, ACCESS_COOKIE);
