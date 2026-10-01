@@ -23,15 +23,19 @@ qui peut reprendre la palette et les polices de Flexfolio.
 
 ## Données et sécurité
 
-Tables `sondage_*` dans le schéma public du projet Supabase (voir `supabase/migrations/`).
-La sécurité par ligne (RLS) est activée sur toutes :
+Tables `sondage_*` dans le schéma public du projet Supabase partagé de Flex Suite. Le SQL (tables, règles,
+migrations) est dans le dépôt **flexstaff**, dossier `supabase/migrations/`. La sécurité par ligne (RLS)
+est activée sur toutes :
 
 | Qui | Accès |
 |---|---|
 | Visiteur (clé anon) | Rien |
 | Votant | Jamais d'accès direct : le serveur agit pour lui (clé service_role) après avoir vérifié sa session |
 | Compte **staff** | Lit les codes de récompense, les sondages et le nom des personnes qui ont une récompense ; peut seulement marquer un code comme remis |
-| Compte **admin** | Tout sur les tables `sondage_*`, et gère l'équipe |
+| Compte **admin** | Tout sur les tables `sondage_*`, et gère l'équipe Flexform |
+
+Les rôles viennent de la table commune `app_roles` (appli `flexform`) ; un super admin de la suite est
+admin partout. Voir le README de flexstaff.
 
 Les requêtes admin et staff arrivent à la base avec le jeton du compte connecté : c'est Postgres qui
 applique ces règles, pas seulement l'appli. Les jetons restent dans des cookies HttpOnly.
@@ -42,10 +46,9 @@ restent autorisés, car React écrit des attributs `style` au rendu serveur ; le
 Google Fonts pour l'apparence Flexfolio. Les autres en-têtes (nosniff, noindex, caméra) sont dans
 `next.config.ts`.
 
-## Mise en place sur le projet Supabase de Flexfolio
+## Mise en place
 
-1. Dans Supabase, **SQL Editor** : coller et exécuter `supabase/migrations/20260930120000_sondage.sql`
-   (ou `npx supabase link` puis `npx supabase db push`). Le script ne touche pas aux tables du portfolio.
+1. Base : appliquer les migrations du dépôt **flexstaff** (voir son README), qui créent aussi les rôles.
 2. Dans Vercel, importer le dépôt avec le preset **Next.js** (détecté automatiquement), Node.js 22.x,
    puis **Settings → Environment Variables** :
 
@@ -55,31 +58,18 @@ Google Fonts pour l'apparence Flexfolio. Les autres en-têtes (nosniff, noindex,
    | `SUPABASE_ANON_KEY` | Clé anon (la même que `NEXT_PUBLIC_SUPABASE_ANON_KEY`) |
    | `SUPABASE_SERVICE_ROLE_KEY` | Clé service_role (Supabase → Project Settings → API). Secrète : jamais côté navigateur |
 
-3. Créer les comptes de l'équipe, depuis ton poste, avec un `.env` qui contient les trois variables :
-
-   ```bash
-   npm run staff -- prenom.nom@exemple.fr admin
-   ```
-
-   `staff` à la place de `admin` pour un compte staff, `remove` pour retirer l'accès. Un compte Supabase
-   existant (ton compte admin Flexfolio, par exemple) reçoit seulement le rôle ; sinon le compte est créé
-   et un mot de passe provisoire est affiché.
+3. Comptes de l'équipe : depuis flexstaff, `npm run role -- prenom.nom@exemple.fr flexform staff`
+   (`admin` pour un admin, `remove` pour retirer l'accès).
 4. Redéployer.
 
 ## Tester en local
 
-Il faut Docker (Docker Desktop) pour faire tourner Supabase en local :
+La base locale est celle de Flex Suite (Docker Desktop requis) : `npm run db:start` dans
+flexstaff, copier `SUPABASE_URL`, `SUPABASE_ANON_KEY` et `SUPABASE_SERVICE_ROLE_KEY` de son `.env` dans
+le `.env` de Flexform, et créer des comptes avec `npm run role` (voir le README de flexstaff). Puis :
 
 ```bash
 npm install
-npm run db:start
-npx supabase status -o env
-```
-
-Copier `API_URL`, `ANON_KEY` et `SERVICE_ROLE_KEY` dans `.env` sous les noms `SUPABASE_URL`,
-`SUPABASE_ANON_KEY` et `SUPABASE_SERVICE_ROLE_KEY`, créer un compte avec `npm run staff`, puis :
-
-```bash
 npm run dev
 ```
 
@@ -95,7 +85,7 @@ node --env-file=.env scripts/e2e.mjs http://localhost:8787
 ```
 
 `scripts/e2e.mjs` teste les parcours et la RLS contre la base locale (il refuse de tourner sur une
-autre base). `npm run db:stop` arrête Supabase.
+autre base).
 
 ## Structure
 
@@ -108,8 +98,7 @@ autre base). `npm run db:stop` arrête Supabase.
 | `src/lib/client/` | Outils des pages : appels API, interrogation régulière, mise en forme, téléchargements |
 | `src/lib/shared/` | Types et succès communs au serveur et aux pages |
 | `src/proxy.ts` | Content-Security-Policy avec nonce |
-| `supabase/` | Migration SQL (tables, RLS) et configuration locale |
-| `scripts/` | Gestion de l'équipe, test de bout en bout |
+| `scripts/` | Test de bout en bout |
 
 ## Variables d'environnement
 

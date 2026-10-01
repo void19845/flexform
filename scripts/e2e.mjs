@@ -1,5 +1,6 @@
 /**
- * Test de bout en bout contre une base Supabase LOCALE (npm run db:start) et l'appli lancée en local.
+ * Test de bout en bout contre la base Supabase LOCALE de Flex Suite (npm run db:start dans
+ * flexstaff, comptes créés avec npm run role) et l'appli lancée en local.
  * Vérifie les parcours (votant, admin, staff) et la sécurité par ligne en interrogeant la base
  * directement avec chaque rôle. Ne jamais lancer contre la base de production : il crée et supprime des données.
  *
@@ -130,7 +131,7 @@ check("succès « Chasseur de récompenses »", (await lea("/api/leaderboard")).
 console.log("\n# Sécurité par ligne (accès direct à la base)");
 const staffJwt = await token(process.env.TEST_STAFF_EMAIL, process.env.TEST_STAFF_PASSWORD);
 const adminJwt = await token(process.env.TEST_ADMIN_EMAIL, process.env.TEST_ADMIN_PASSWORD);
-for (const table of ["sondage_participants", "sondage_votes", "sondage_reward_codes", "sondage_polls", "sondage_settings", "sondage_staff"]) {
+for (const table of ["sondage_participants", "sondage_votes", "sondage_reward_codes", "sondage_polls", "sondage_settings", "app_roles"]) {
   const r = await rest(ANON, `${table}?select=*`);
   check(`anon ne lit rien dans ${table}`, r.status === 401 || r.status === 403 || (Array.isArray(r.data) && r.data.length === 0), `${r.status} ${JSON.stringify(r.data).slice(0, 100)}`);
 }
@@ -143,12 +144,13 @@ const staffEdit = await rest(staffJwt, "sondage_polls?id=eq.ag-roles", { method:
 check("le staff ne modifie pas les sondages", staffEdit.status >= 400 || staffEdit.data.length === 0, JSON.stringify(staffEdit));
 const steal = await rest(staffJwt, `sondage_reward_codes?code=eq.${code}`, { method: "PATCH", body: { participant_id: "00000000-0000-0000-0000-000000000000" } });
 check("le staff ne peut pas réattribuer un code", steal.status >= 400, `${steal.status}`);
-const promote = await rest(staffJwt, "sondage_staff", { method: "POST", body: { user_id: "00000000-0000-0000-0000-000000000000", role: "admin" } });
-check("le staff ne peut pas se donner le rôle admin", promote.status >= 400, `${promote.status}`);
-const own = await rest(staffJwt, "sondage_staff?select=role");
+// Droits de la suite (table app_roles) : les règles détaillées sont testées par npm run test:rls dans Flex Suite
+const promote = await rest(staffJwt, "app_roles?app=eq.flexform", { method: "PATCH", body: { role: "admin" }, prefer: "return=representation" });
+check("le staff ne peut pas se donner le rôle admin", promote.status >= 400 || promote.data.length === 0, `${promote.status}`);
+const own = await rest(staffJwt, "app_roles?select=role&app=eq.flexform");
 check("le staff lit seulement sa propre ligne d'équipe", own.data.length === 1 && own.data[0].role === "staff");
 check("l'admin lit tous les votes", (await rest(adminJwt, "sondage_votes?select=*")).data.length === 3);
-check("l'admin lit toute l'équipe", (await rest(adminJwt, "sondage_staff?select=role")).data.length >= 2);
+check("l'admin lit toute l'équipe Flexform", (await rest(adminJwt, "app_roles?select=role&app=eq.flexform")).data.length >= 2);
 
 console.log("\n# RGPD et remise à zéro");
 check("remise à zéro : codes annulés", (await admin("/api/admin/action", { method: "POST", body: { id: "ag-roles", action: "reset" } })).status === 200 &&
