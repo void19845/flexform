@@ -5,7 +5,7 @@ import type { Run } from "@/components/admin/admin-panel";
 import { post } from "@/lib/client/api";
 import { MAX_CATEGORY_LENGTH, MAX_REWARD_LENGTH, type PollKind } from "@/lib/shared/types";
 
-const EMPTY = { question: "", kind: "choice" as PollKind, options: "", category: "", reward: "", hub: false };
+const EMPTY = { question: "", kind: "choice" as PollKind, options: "", category: "", reward: "", hub: false, staffOnly: false };
 
 /** Formulaire de création. categories : catégories existantes, proposées en suggestions du champ Catégorie. */
 export function CreatePollForm({ categories, run, flash }: { categories: string[]; run: Run; flash: (message: string) => void }) {
@@ -15,7 +15,8 @@ export function CreatePollForm({ categories, run, flash }: { categories: string[
   function submit(e: FormEvent<HTMLFormElement>): void {
     e.preventDefault();
     run(async () => {
-      await post("/api/admin/polls", { ...draft, options: draft.options.split("\n") });
+      // Un sondage réservé au staff n'a pas de récompense
+      await post("/api/admin/polls", { ...draft, options: draft.options.split("\n"), reward: draft.staffOnly ? "" : draft.reward });
       setDraft(EMPTY);
       flash("Sondage ajouté");
     });
@@ -63,7 +64,13 @@ export function CreatePollForm({ categories, run, flash }: { categories: string[
           ))}
         </datalist>
       </label>
-      <label className="field">
+      <label className="check">
+        <input type="checkbox" checked={draft.staffOnly} onChange={(e) => edit({ staffOnly: e.target.checked })} />
+        <span>
+          Réservé au staff <em>(jamais montré aux votants ; le staff y répond depuis la page /staff)</em>
+        </span>
+      </label>
+      <label className="field" hidden={draft.staffOnly}>
         <span>Récompense en répondant (facultatif, QR code à usage unique)</span>
         <input
           type="text"
@@ -75,7 +82,7 @@ export function CreatePollForm({ categories, run, flash }: { categories: string[
       </label>
       <label className="check">
         <input type="checkbox" checked={draft.hub} onChange={(e) => edit({ hub: e.target.checked })} />
-        <span>{"Mettre dans le hub de l'accueil (ouvert sans limite de temps)"}</span>
+        <span>{draft.staffOnly ? "Ouvrir tout de suite au staff" : "Mettre dans le hub de l'accueil (ouvert sans limite de temps)"}</span>
       </label>
       <button type="submit" className="btn primary">
         Ajouter le sondage

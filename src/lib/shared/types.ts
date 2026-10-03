@@ -26,6 +26,8 @@ export interface Poll {
   category?: string;
   /** Récompense gagnée en répondant (ex. « 1 café offert »), remise par le staff via un QR code */
   reward?: string;
+  /** Réservé au staff : jamais montré aux votants, répondu depuis /staff tant qu'il est dans le hub */
+  staffOnly?: boolean;
   createdAt: number;
   /** Première mise en ligne (lancé en direct ou mis dans le hub), pour le succès « Plus rapide que la lumière » */
   publishedAt?: number;
@@ -43,7 +45,7 @@ export interface PollResults {
 }
 
 /** Un sondage tel que le voit un votant, avec sa propre réponse */
-export interface PublicPoll extends Omit<Poll, "createdAt" | "reveal" | "hub" | "category" | "reward"> {
+export interface PublicPoll extends Omit<Poll, "createdAt" | "reveal" | "hub" | "category" | "reward" | "staffOnly"> {
   /** null tant que l'admin n'a pas rendu les résultats visibles */
   results: PollResults | null;
   /** optionId pour un choix, texte pour une réponse libre */
@@ -172,6 +174,9 @@ export interface RespondentsState {
   respondents: Respondent[];
 }
 
+/** Sondage réservé au staff, tel que le voit un compte staff ou admin sur /staff, avec sa propre réponse */
+export type StaffPoll = Pick<PublicPoll, "id" | "kind" | "question" | "options" | "myVote">;
+
 export interface LeaderboardEntry {
   rank: number;
   pseudo: string;
@@ -183,6 +188,7 @@ export interface LeaderboardEntry {
 export interface LeaderboardState {
   /** Pseudo du votant connecté */
   pseudo: string;
+  /** Sondages des votants (hors sondages réservés au staff) */
   totalPolls: number;
   top: LeaderboardEntry[];
   /** Place du votant connecté, null s'il n'a encore rien répondu */

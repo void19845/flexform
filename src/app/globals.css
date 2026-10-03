@@ -318,6 +318,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--v
 
 .badge.hub { background: #FFF4D6; color: #7A5A00; }
 .badge.category { background: #EDE8FF; color: var(--violet); }
+.badge.staff { background: var(--dark); color: #fff; }
 .check { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px; font-size: 0.9rem; cursor: pointer; }
 .check input { width: auto; flex: none; margin-top: 3px; accent-color: var(--violet); }
 .check a { color: var(--violet); }

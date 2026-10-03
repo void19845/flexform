@@ -18,9 +18,9 @@ function Row({ entry, total, mine }: { entry: LeaderboardEntry; total: number; m
   );
 }
 
-/** Classement des votants, caché tant que personne n'a répondu. */
+/** Classement des votants, affiché même quand personne n'a encore répondu. */
 export function Leaderboard({ state }: { state: LeaderboardState | null }) {
-  if (!state || state.top.length === 0) return null;
+  if (!state) return null;
   const { top, me, totalPolls } = state;
   const isMe = (e: LeaderboardEntry): boolean => me !== null && e.rank === me.rank && e.pseudo === me.pseudo;
   const meInTop = top.some(isMe);
@@ -28,7 +28,8 @@ export function Leaderboard({ state }: { state: LeaderboardState | null }) {
     <section className="card leaderboard">
       <h2>Classement</h2>
       <p className="muted">Qui a répondu au plus de sondages ?</p>
-      <ol className="rank-list">
+      {top.length === 0 && <p className="hint">{"Personne n'a encore répondu : réponds à un sondage pour prendre la première place."}</p>}
+      <ol className="rank-list" hidden={top.length === 0}>
         {/* Clé par position : un pseudo libéré à la déconnexion peut revenir, ex æquo compris */}
         {top.map((e, i) => (
           <Row key={i} entry={e} total={totalPolls} mine={isMe(e)} />
@@ -42,7 +43,7 @@ export function Leaderboard({ state }: { state: LeaderboardState | null }) {
           </>
         )}
       </ol>
-      {!me && <p className="hint">Réponds à un sondage pour entrer dans le classement.</p>}
+      {!me && top.length > 0 && <p className="hint">Réponds à un sondage pour entrer dans le classement.</p>}
     </section>
   );
 }

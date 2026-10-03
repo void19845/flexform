@@ -9,16 +9,21 @@ qui peut reprendre la palette et les polices de Flexfolio.
 - `/` : les participants entrent prénom, nom, formation et pseudo, et donnent leur consentement RGPD
   (politique obligatoire, communication et sponsors facultatifs). Le sondage lancé en direct apparaît
   en haut de la page ; en dessous, le **hub** liste les sondages ouverts sans limite de temps, puis le
-  **classement** des votants (pseudos uniquement) et les **succès** (voir `src/lib/shared/achievements.ts`).
+  **classement** des votants (pseudos uniquement, affiché même avant la première réponse) et les **succès**
+  (voir `src/lib/shared/achievements.ts`).
   Les récompenses gagnées s'affichent dans **Mes récompenses**, chacune avec un QR code à usage unique.
   **Mes données** permet de voir, télécharger ou supprimer ses données et de changer ses consentements.
 - `/admin` (compte admin) : lancer, clôturer et afficher les résultats des sondages. Chaque sondage peut
   être mis dans le hub, rangé dans une catégorie et doté d'une récompense (ex. « 1 café offert »).
+  Un sondage **réservé au staff** (case à cocher à la création) n'est jamais montré aux votants et ne compte
+  ni dans le classement ni dans les succès : le staff y répond depuis `/staff` tant qu'il est ouvert
+  (bouton « Ouvrir au staff »). Il ne se lance pas en direct et n'a pas de récompense.
   L'onglet **Répondants & export** liste qui a répondu, avec filtres par jour, catégorie, sondage et
   consentement, recherche, classement, répartition par formation et exports CSV (pour Excel).
   L'onglet **Apparence** lie le site à la palette et aux polices de Flexfolio, ou l'en délie.
 - `/staff` (compte staff ou admin) : scanner le QR code d'une récompense, voir à qui elle appartient
-  et valider la remise. Un code ne sert qu'une fois.
+  et valider la remise. Un code ne sert qu'une fois. Les sondages réservés au staff et ouverts s'y
+  affichent aussi, avec la réponse de chaque compte.
 - `/confidentialite` : politique de confidentialité (les passages entre crochets sont à compléter).
 
 ## Données et sécurité
@@ -31,7 +36,7 @@ est activée sur toutes :
 |---|---|
 | Visiteur (clé anon) | Rien |
 | Votant | Jamais d'accès direct : le serveur agit pour lui (clé service_role) après avoir vérifié sa session |
-| Compte **staff** | Lit les codes de récompense, les sondages et le nom des personnes qui ont une récompense ; peut seulement marquer un code comme remis |
+| Compte **staff** | Lit les codes de récompense, les sondages et le nom des personnes qui ont une récompense ; peut seulement marquer un code comme remis, et répondre en son nom aux sondages réservés au staff ouverts (il ne lit que ses propres réponses) |
 | Compte **admin** | Tout sur les tables `sondage_*`, et gère l'équipe Flexform |
 
 Les rôles viennent de la table commune `app_roles` (appli `flexform`) ; un super admin de la suite est

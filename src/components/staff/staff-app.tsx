@@ -3,10 +3,12 @@
 import jsQR from "jsqr";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { AccountLoginForm } from "@/components/account-login-form";
+import { PollCard } from "@/components/vote/poll-card";
 import { currentAccount, signOut } from "@/lib/client/account";
-import { isAuthError, post } from "@/lib/client/api";
+import { api, isAuthError, post } from "@/lib/client/api";
 import { dateTimeFmt, formatCode } from "@/lib/client/format";
-import type { RewardCheck } from "@/lib/shared/types";
+import { usePolling } from "@/lib/client/use-polling";
+import type { RewardCheck, StaffPoll } from "@/lib/shared/types";
 
 /** Lecteur de QR intégré au navigateur (Chrome, Android). Absent sur Safari : on passe alors par jsQR. */
 interface QrDetector {
@@ -205,6 +207,7 @@ function Scanner({
           Déconnexion
         </button>
       </header>
+      <StaffPolls onUnauthorized={() => onUnauthorized("", "Session expirée ou accès retiré, reconnecte-toi.")} />
       <div className="card scanner">
         <div className="video-box">
           <video ref={videoRef} playsInline muted autoPlay hidden={camera !== "on"} />
@@ -257,6 +260,37 @@ function Scanner({
         </form>
       </div>
     </>
+  );
+}
+
+// --- Sondages réservés au staff ---------------------------------------------
+
+/** Sondages ouverts au staff, cachés s'il n'y en a aucun. */
+function StaffPolls({ onUnauthorized }: { onUnauthorized: () => void }) {
+  const [polled, setPolled] = useState<{ polls: StaffPoll[]; startedAt: number } | null>(null);
+  const refresh = usePolling(() => api<StaffPoll[]>("/api/staff/polls"), 10000, {
+    onState: (polls, startedAt) => setPolled({ polls, startedAt }),
+    onUnauthorized,
+  });
+
+  if (!polled?.polls.length) return null;
+  return (
+    <section className="hub">
+      <h2 className="hub-title">Sondages du staff</h2>
+      <p className="muted">Visibles seulement par le staff. Tu peux changer ta réponse tant que le sondage est ouvert.</p>
+      <div className="hub-list">
+        {polled.polls.map((p) => (
+          <PollCard
+            key={p.id}
+            poll={{ ...p, status: "open", results: null, reward: null }}
+            startedAt={polled.startedAt}
+            live={false}
+            onVoted={refresh}
+            staff
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 

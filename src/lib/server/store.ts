@@ -20,6 +20,7 @@ import {
   type Respondent,
   type RespondentsState,
   type RewardCheck,
+  type StaffPoll,
 } from "@/lib/shared/types";
 import {
   ACHIEVEMENTS,
@@ -35,7 +36,8 @@ import { Db, DbError, eq, inList, serviceDb } from "./supabase";
 
 /*
  * Données dans Supabase (voir supabase/migrations) :
- *   sondage_polls, sondage_settings, sondage_participants, sondage_votes, sondage_reward_codes.
+ *   sondage_polls, sondage_settings, sondage_participants, sondage_votes, sondage_reward_codes,
+ *   sondage_staff_votes (réponses du staff aux sondages qui lui sont réservés).
  * Les fonctions des votants utilisent serviceDb() : le serveur a vérifié leur session.
  * Les fonctions admin et staff reçoivent la connexion du compte connecté : la RLS s'applique.
  */
@@ -53,6 +55,7 @@ interface PollRow {
   hub: boolean;
   category: string;
   reward: string;
+  staff_only: boolean;
   created_at: string;
   published_at: string | null;
 }
@@ -79,6 +82,12 @@ interface VoteRow {
   voted_at: string;
 }
 
+interface StaffVoteRow {
+  poll_id: string;
+  user_id: string;
+  value: string;
+}
+
 interface CodeRow {
   code: string;
   poll_id: string;
@@ -102,6 +111,7 @@ function toPoll(r: PollRow): Poll {
     hub: r.hub,
     category: r.category,
     reward: r.reward,
+    staffOnly: r.staff_only,
     createdAt: Date.parse(r.created_at),
     ...(r.published_at ? { publishedAt: Date.parse(r.published_at) } : {}),
   };
@@ -242,18 +252,25 @@ function acceptsVotes(meta: Meta, poll: Poll): boolean {
   return Boolean(poll.hub) || (poll.id === meta.activePollId && poll.status === "open");
 }
 
-/** Enregistre ou remplace la réponse : optionId pour un choix, texte pour une réponse libre. */
-export async function vote(sessionId: string, pollId: string, value: string): Promise<void> {
-  const db = serviceDb();
-  const meta = await loadMeta(db);
-  const poll = findPoll(meta, pollId);
-  if (!acceptsVotes(meta, poll)) throw new HttpError(409, "Le vote est clôturé");
+/** Réponse valide pour ce sondage : un de ses choix, ou un texte de 1 à MAX_ANSWER_LENGTH caractères. */
+function checkAnswer(poll: Pick<Poll, "kind" | "options">, value: string): void {
   if (poll.kind === "choice" && !poll.options.some((o) => o.id === value)) {
     throw new HttpError(400, "Choix invalide");
   }
   if (poll.kind === "text" && (value.length < 1 || value.length > MAX_ANSWER_LENGTH)) {
     throw new HttpError(400, `Ta réponse doit faire entre 1 et ${MAX_ANSWER_LENGTH} caractères`);
   }
+}
+
+/** Enregistre ou remplace la réponse : optionId pour un choix, texte pour une réponse libre. */
+export async function vote(sessionId: string, pollId: string, value: string): Promise<void> {
+  const db = serviceDb();
+  const meta = await loadMeta(db);
+  const poll = findPoll(meta, pollId);
+  // Sondage réservé au staff : inexistant pour les votants
+  if (poll.staffOnly) throw new HttpError(404, "Sondage introuvable");
+  if (!acceptsVotes(meta, poll)) throw new HttpError(409, "Le vote est clôturé");
+  checkAnswer(poll, value);
   await db.insert(
     "sondage_votes",
     { poll_id: pollId, participant_id: sessionId, value, voted_at: nowIso() },
@@ -269,8 +286,9 @@ export async function publicState(sessionId: string, pseudo: string): Promise<Pu
     db.count("sondage_participants", "active=eq.true"),
   ]);
   const mine = new Map(myVotes.map((v) => [v.poll_id, v.value]));
-  const live = meta.polls.find((p) => p.id === meta.activePollId) ?? null;
-  const hub = meta.polls.filter((p) => p.hub && p.id !== meta.activePollId);
+  // Les sondages réservés au staff ne sont jamais envoyés aux votants
+  const live = meta.polls.find((p) => p.id === meta.activePollId && !p.staffOnly) ?? null;
+  const hub = meta.polls.filter((p) => p.hub && !p.staffOnly && p.id !== meta.activePollId);
   const shown = [...(live ? [live] : []), ...hub];
 
   // Résultats seulement pour les sondages affichés dont l'admin a rendu les résultats visibles
@@ -386,14 +404,45 @@ export async function redeemReward(db: Db, userId: string, rawCode: string): Pro
   return { ...check, status: "done", redeemedAt: Date.parse(at) };
 }
 
+// --- Staff : sondages réservés ---------------------------------------------
+
+/** Sondages réservés au staff et ouverts (dans le hub), avec la réponse du compte connecté. */
+export async function staffPolls(db: Db, userId: string): Promise<StaffPoll[]> {
+  const [rows, mine] = await Promise.all([
+    db.select<PollRow>("sondage_polls", "select=*&staff_only=eq.true&hub=eq.true&order=position.asc,created_at.asc"),
+    db.select<StaffVoteRow>("sondage_staff_votes", `select=poll_id,value&user_id=${eq(userId)}`),
+  ]);
+  return rows.map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    question: r.question,
+    options: r.options,
+    myVote: mine.find((v) => v.poll_id === r.id)?.value ?? null,
+  }));
+}
+
+/** Enregistre ou remplace la réponse du compte connecté. La RLS refuse aussi tout autre sondage ou compte. */
+export async function staffVote(db: Db, userId: string, pollId: string, value: string): Promise<void> {
+  const poll = await db.one<PollRow>("sondage_polls", `select=*&id=${eq(pollId)}&staff_only=eq.true`);
+  if (!poll) throw new HttpError(404, "Sondage introuvable");
+  if (!poll.hub) throw new HttpError(409, "Le vote est clôturé");
+  checkAnswer(poll, value);
+  await db.insert(
+    "sondage_staff_votes",
+    { poll_id: pollId, user_id: userId, value, voted_at: nowIso() },
+    { onConflict: "poll_id,user_id", resolution: "merge" },
+  );
+}
+
 // --- Admin : lecture -------------------------------------------------------
 
 export async function adminState(db: Db): Promise<AdminState> {
-  const [meta, people, votes, codes] = await Promise.all([
+  const [meta, people, votes, codes, staffVotes] = await Promise.all([
     loadMeta(db),
     db.select<ParticipantRow>("sondage_participants", `select=${PARTICIPANT_COLUMNS}&active=eq.true`),
     db.select<VoteRow>("sondage_votes", "select=poll_id,participant_id,value"),
     db.select<CodeRow>("sondage_reward_codes", "select=poll_id,redeemed_at"),
+    db.select<StaffVoteRow>("sondage_staff_votes", "select=poll_id,value"),
   ]);
   const byPoll = votesByPoll(votes);
   const activeVotes = byPoll.get(meta.activePollId ?? "") ?? new Map();
@@ -401,9 +450,13 @@ export async function adminState(db: Db): Promise<AdminState> {
     activePollId: meta.activePollId,
     polls: meta.polls.map((p) => {
       const pollCodes = codes.filter((c) => c.poll_id === p.id);
+      // Sondage réservé au staff : résultats tirés des réponses du staff
+      const values = p.staffOnly
+        ? staffVotes.filter((v) => v.poll_id === p.id).map((v) => v.value)
+        : [...(byPoll.get(p.id)?.values() ?? [])].map((v) => v.value);
       return {
         ...p,
-        results: computeResults(p, [...(byPoll.get(p.id)?.values() ?? [])].map((v) => v.value)),
+        results: computeResults(p, values),
         rewards: { issued: pollCodes.length, redeemed: pollCodes.filter((c) => c.redeemed_at).length },
       };
     }),
@@ -445,12 +498,14 @@ const LEADERBOARD_SIZE = 10;
 /** Classement par nombre de sondages répondus. Seuls les pseudos sont montrés aux votants. */
 export async function leaderboard(sessionId: string, pseudo: string): Promise<LeaderboardState> {
   const db = serviceDb();
-  const [meta, votes, people, myCodes] = await Promise.all([
+  const [all, votes, people, myCodes] = await Promise.all([
     loadMeta(db),
     db.select<VoteRow>("sondage_votes", "select=poll_id,participant_id,value,voted_at"),
     db.select<{ id: string; pseudo: string }>("sondage_participants", "select=id,pseudo"),
     db.select<CodeRow>("sondage_reward_codes", `select=redeemed_at&participant_id=${eq(sessionId)}&redeemed_at=not.is.null`),
   ]);
+  // Total et succès sur les seuls sondages des votants : les sondages réservés au staff ne comptent pas
+  const meta = { ...all, polls: all.polls.filter((p) => !p.staffOnly) };
   const pseudos = new Map(people.map((p) => [p.id, p.pseudo]));
   const counts = new Map<string, number>();
   for (const v of votes) counts.set(v.participant_id, (counts.get(v.participant_id) ?? 0) + 1);
@@ -521,6 +576,7 @@ export interface PollExtras {
   hub?: boolean;
   category?: string;
   reward?: string;
+  staffOnly?: boolean;
 }
 
 export async function createPoll(db: Db, question: string, kind: PollKind, labels: string[], extras: PollExtras): Promise<void> {
@@ -534,6 +590,7 @@ export async function createPoll(db: Db, question: string, kind: PollKind, label
     hub: extras.hub ?? false,
     category: extras.category ?? "",
     reward: extras.reward ?? "",
+    staff_only: extras.staffOnly ?? false,
     // Créé directement dans le hub : il est en ligne dès maintenant
     published_at: extras.hub ? nowIso() : null,
   });
@@ -556,7 +613,10 @@ export const setReveal = (db: Db, id: string, reveal: boolean): Promise<void> =>
 export const closePoll = (db: Db, id: string): Promise<void> => patchPoll(db, id, { status: "closed" });
 
 /** Change la récompense. Une récompense vide annule les codes pas encore utilisés. */
-export const setReward = (db: Db, id: string, reward: string): Promise<void> => patchPoll(db, id, { reward });
+export async function setReward(db: Db, id: string, reward: string): Promise<void> {
+  if (reward && (await getPoll(db, id)).staff_only) throw new HttpError(400, "Un sondage réservé au staff n'a pas de récompense");
+  await patchPoll(db, id, { reward });
+}
 
 /** Met le sondage dans le hub de l'accueil (ouvert sans limite de temps) ou l'en retire. */
 export async function setHub(db: Db, id: string, hub: boolean): Promise<void> {
@@ -567,6 +627,7 @@ export async function setHub(db: Db, id: string, hub: boolean): Promise<void> {
 /** Affiche le sondage chez tous les votants et ouvre le vote. Un seul vote ouvert à la fois. */
 export async function openPoll(db: Db, id: string): Promise<void> {
   const poll = await getPoll(db, id);
+  if (poll.staff_only) throw new HttpError(409, "Un sondage réservé au staff ne se lance pas en direct : mets-le dans le hub");
   await db.update("sondage_polls", `status=eq.open&id=neq.${encodeURIComponent(id)}`, { status: "closed" });
   await patchPoll(db, id, { status: "open", ...(poll.published_at ? {} : { published_at: nowIso() }) });
   await db.update("sondage_settings", "id=eq.1", { active_poll_id: id });
@@ -581,7 +642,11 @@ export async function deletePoll(db: Db, id: string): Promise<void> {
 /** Efface les réponses et les codes de récompense. La prochaine mise en ligne compte comme une nouvelle publication. */
 export async function resetPoll(db: Db, id: string): Promise<void> {
   const [poll, settings] = await Promise.all([getPoll(db, id), db.one<SettingsRow>("sondage_settings", "select=active_poll_id&id=eq.1")]);
-  await Promise.all([db.remove("sondage_votes", `poll_id=${eq(id)}`), db.remove("sondage_reward_codes", `poll_id=${eq(id)}`)]);
+  await Promise.all([
+    db.remove("sondage_votes", `poll_id=${eq(id)}`),
+    db.remove("sondage_reward_codes", `poll_id=${eq(id)}`),
+    db.remove("sondage_staff_votes", `poll_id=${eq(id)}`),
+  ]);
   const online = poll.hub || settings?.active_poll_id === id;
   await patchPoll(db, id, { reveal: false, published_at: online ? nowIso() : null });
 }
