@@ -17,6 +17,8 @@ export const POST = route(async (req) => {
   if (category.length > MAX_CATEGORY_LENGTH) throw new HttpError(400, `Catégorie : ${MAX_CATEGORY_LENGTH} caractères max`);
   const reward = str(body.reward).replace(/\s+/g, " ");
   if (reward.length > MAX_REWARD_LENGTH) throw new HttpError(400, `Récompense : ${MAX_REWARD_LENGTH} caractères max`);
-  await createPoll(db, question, kind, options, { hub: body.hub === true, category, reward });
+  const staffOnly = body.staffOnly === true;
+  if (staffOnly && reward) throw new HttpError(400, "Un sondage réservé au staff n'a pas de récompense");
+  await createPoll(db, question, kind, options, { hub: body.hub === true, category, reward, staffOnly });
   return json({ ok: true }, 201);
 });

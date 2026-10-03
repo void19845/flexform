@@ -66,6 +66,7 @@ async function token(email, password) {
 
 // Base propre : on retire les votants et les codes des tests précédents, et on remet les sondages en brouillon
 await rest(SERVICE, "sondage_participants?id=not.is.null", { method: "DELETE" });
+await rest(SERVICE, "sondage_polls?staff_only=eq.true", { method: "DELETE" });
 await rest(SERVICE, "sondage_polls?id=not.is.null", { method: "PATCH", body: { status: "draft", hub: false, reward: "", reveal: false, published_at: null } });
 await rest(SERVICE, "sondage_settings?id=eq.1", { method: "PATCH", body: { active_poll_id: null, theme_linked: true } });
 await rest(SERVICE, "sondage_rate_limits?key=not.is.null", { method: "DELETE" });
@@ -128,10 +129,36 @@ check("double validation simultanée : une seule réussit", [a.data.status, b.da
 check("code inconnu", (await staff("/api/staff/check", { method: "POST", body: { code: "ZZZZZZZZZZZZ" } })).data.status === "invalid");
 check("succès « Chasseur de récompenses »", (await lea("/api/leaderboard")).data.achievements.find((x) => x.id === "collector")?.unlocked === true);
 
+console.log("\n# Sondages réservés au staff");
+const staffPollBody = { question: "Dispo pour la réunion staff ?", kind: "choice", options: ["Oui", "Non"], staffOnly: true, hub: true };
+check("sondage staff avec récompense refusé", (await admin("/api/admin/polls", { method: "POST", body: { ...staffPollBody, reward: "1 café" } })).status === 400);
+check("création d'un sondage staff ouvert", (await admin("/api/admin/polls", { method: "POST", body: staffPollBody })).status === 201);
+const staffPollId = (await admin("/api/admin/state")).data.polls.find((p) => p.staffOnly)?.id;
+const leaState = (await lea("/api/state")).data;
+check("le votant ne voit pas le sondage staff", staffPollId && leaState.poll?.id !== staffPollId && !leaState.hub.some((p) => p.id === staffPollId), JSON.stringify(leaState.hub));
+check("le votant ne peut pas répondre au sondage staff", (await lea("/api/vote", { method: "POST", body: { pollId: staffPollId, value: "0" } })).status === 404);
+check("le votant n'accède pas aux sondages staff", (await lea("/api/staff/polls")).status === 401 && (await lea("/api/staff/vote", { method: "POST", body: { pollId: staffPollId, value: "0" } })).status === 401);
+check("lancer en direct refusé pour un sondage staff", (await admin("/api/admin/action", { method: "POST", body: { id: staffPollId, action: "open" } })).status === 409);
+check("le sondage staff ne compte pas dans le classement", (await lea("/api/leaderboard")).data.totalPolls === 6);
+check("le staff voit le sondage staff", (await staff("/api/staff/polls")).data.some?.((p) => p.id === staffPollId && p.myVote === null));
+check("le staff répond", (await staff("/api/staff/vote", { method: "POST", body: { pollId: staffPollId, value: "1" } })).status === 200);
+check("l'admin répond aussi depuis /staff", (await admin("/api/staff/vote", { method: "POST", body: { pollId: staffPollId, value: "0" } })).status === 200);
+check("le staff retrouve sa réponse", (await staff("/api/staff/polls")).data.find?.((p) => p.id === staffPollId)?.myVote === "1");
+check("choix invalide refusé au staff", (await staff("/api/staff/vote", { method: "POST", body: { pollId: staffPollId, value: "9" } })).status === 400);
+check("le staff ne peut pas répondre à un sondage normal par /staff", (await staff("/api/staff/vote", { method: "POST", body: { pollId: "ag-roles", value: "0" } })).status === 404);
+const staffResults = (await admin("/api/admin/state")).data.polls.find((p) => p.id === staffPollId)?.results;
+check("résultats du sondage staff dans l'admin", staffResults?.total === 2 && staffResults.counts["1"] === 1, JSON.stringify(staffResults));
+check("aucune réponse du staff parmi les votes des votants", (await rest(SERVICE, `sondage_votes?select=poll_id&poll_id=eq.${staffPollId}`)).data.length === 0);
+await admin("/api/admin/action", { method: "POST", body: { id: staffPollId, action: "unhub" } });
+check("réponse du staff refusée une fois le sondage fermé", (await staff("/api/staff/vote", { method: "POST", body: { pollId: staffPollId, value: "0" } })).status === 409);
+check("sondage fermé absent de /staff", (await staff("/api/staff/polls")).data.length === 0);
+check("remise à zéro : réponses du staff effacées", (await admin("/api/admin/action", { method: "POST", body: { id: staffPollId, action: "reset" } })).status === 200 &&
+  (await rest(SERVICE, `sondage_staff_votes?select=user_id&poll_id=eq.${staffPollId}`)).data.length === 0);
+
 console.log("\n# Sécurité par ligne (accès direct à la base)");
 const staffJwt = await token(process.env.TEST_STAFF_EMAIL, process.env.TEST_STAFF_PASSWORD);
 const adminJwt = await token(process.env.TEST_ADMIN_EMAIL, process.env.TEST_ADMIN_PASSWORD);
-for (const table of ["sondage_participants", "sondage_votes", "sondage_reward_codes", "sondage_polls", "sondage_settings", "app_roles"]) {
+for (const table of ["sondage_participants", "sondage_votes", "sondage_reward_codes", "sondage_polls", "sondage_settings", "sondage_staff_votes", "app_roles"]) {
   const r = await rest(ANON, `${table}?select=*`);
   check(`anon ne lit rien dans ${table}`, r.status === 401 || r.status === 403 || (Array.isArray(r.data) && r.data.length === 0), `${r.status} ${JSON.stringify(r.data).slice(0, 100)}`);
 }

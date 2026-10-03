@@ -35,10 +35,15 @@ export function PollCard({ poll: p, num, active, run }: { poll: AdminState["poll
     <article className={active ? "card poll-admin active" : "card poll-admin"}>
       <div className="poll-meta">
         <span className="num">{num}</span>
-        <span className={`badge ${p.status}`}>{STATUS[p.status]}</span>
+        {/* Sondage réservé au staff : ouvert ou fermé selon le hub, jamais lancé en direct */}
+        {p.staffOnly ? (
+          <span className="badge staff">{p.hub ? "Réservé au staff · ouvert" : "Réservé au staff · fermé"}</span>
+        ) : (
+          <span className={`badge ${p.status}`}>{STATUS[p.status]}</span>
+        )}
         {active && <span className="badge live">Affiché</span>}
-        {p.hub && <span className="badge hub">Dans le hub</span>}
-        {p.reveal && <span className="badge">Résultats visibles</span>}
+        {p.hub && !p.staffOnly && <span className="badge hub">Dans le hub</span>}
+        {p.reveal && !p.staffOnly && <span className="badge">Résultats visibles</span>}
         <span className="badge">{p.kind === "text" ? "Réponse libre" : "Choix"}</span>
         {p.category && <span className="badge category">{p.category}</span>}
         {p.reward && (
@@ -51,7 +56,7 @@ export function PollCard({ poll: p, num, active, run }: { poll: AdminState["poll
       <h3>{p.question}</h3>
       {p.kind === "choice" ? <Bars options={p.options} results={p.results} /> : <Answers list={p.results.answers} />}
       <div className="actions">
-        {!live && (
+        {!live && !p.staffOnly && (
           <button type="button" className="btn primary" onClick={() => act("open")}>
             {p.status === "draft" ? "Lancer" : "Relancer"}
           </button>
@@ -61,18 +66,28 @@ export function PollCard({ poll: p, num, active, run }: { poll: AdminState["poll
             Clôturer
           </button>
         )}
-        <button type="button" className="btn" onClick={() => act(p.hub ? "unhub" : "hub")}>
-          {p.hub ? "Retirer du hub" : "Mettre dans le hub"}
-        </button>
-        <button type="button" className="btn" onClick={() => act(p.reveal ? "hide" : "reveal")}>
-          {p.reveal ? "Masquer les résultats" : "Montrer les résultats"}
-        </button>
+        {p.staffOnly ? (
+          <button type="button" className={p.hub ? "btn warn" : "btn primary"} onClick={() => act(p.hub ? "unhub" : "hub")}>
+            {p.hub ? "Fermer au staff" : "Ouvrir au staff"}
+          </button>
+        ) : (
+          <>
+            <button type="button" className="btn" onClick={() => act(p.hub ? "unhub" : "hub")}>
+              {p.hub ? "Retirer du hub" : "Mettre dans le hub"}
+            </button>
+            <button type="button" className="btn" onClick={() => act(p.reveal ? "hide" : "reveal")}>
+              {p.reveal ? "Masquer les résultats" : "Montrer les résultats"}
+            </button>
+          </>
+        )}
         <button type="button" className="btn ghost" onClick={editCategory}>
           Catégorie
         </button>
-        <button type="button" className="btn ghost" onClick={editReward}>
-          Récompense
-        </button>
+        {!p.staffOnly && (
+          <button type="button" className="btn ghost" onClick={editReward}>
+            Récompense
+          </button>
+        )}
         <button type="button" className="btn ghost" onClick={() => act("reset", "Effacer toutes les réponses de ce sondage ?")}>
           Remettre à zéro
         </button>
