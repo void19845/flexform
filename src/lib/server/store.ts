@@ -35,7 +35,7 @@ import { HttpError } from "./errors";
 import { Db, DbError, eq, inList, serviceDb } from "./supabase";
 
 /*
- * Données dans Supabase (voir supabase/migrations) :
+ * Données dans Supabase (voir supabase/init.sql) :
  *   sondage_polls, sondage_settings, sondage_participants, sondage_votes, sondage_reward_codes,
  *   sondage_staff_votes (réponses du staff aux sondages qui lui sont réservés).
  * Les fonctions des votants utilisent serviceDb() : le serveur a vérifié leur session.
