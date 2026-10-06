@@ -3,8 +3,8 @@
 Application de sondages du BDE Montreuil (« Sondages AG · BDE Montreuil » côté participants), en
 Next.js 16 (App Router, React 19, TypeScript), hébergeable sur Vercel, avec les données dans Supabase.
 Fait partie de **Flex Suite** avec
-le portfolio [Flexfolio](https://github.com/void19845/flexfolio) : même projet Supabase, et apparence
-qui peut reprendre la palette et les polices de Flexfolio.
+le portfolio [Flexfolio](https://github.com/void19845/flexfolio) : même projet Supabase. L'apparence est
+celle du BDE (variables CSS de `src/app/globals.css`), indépendante de Flexfolio.
 
 - `/` : les participants entrent prénom, nom, formation et pseudo, et donnent leur consentement RGPD
   (politique obligatoire, communication et sponsors facultatifs). Le sondage lancé en direct apparaît
@@ -20,7 +20,6 @@ qui peut reprendre la palette et les polices de Flexfolio.
   (bouton « Ouvrir au staff »). Il ne se lance pas en direct et n'a pas de récompense.
   L'onglet **Répondants & export** liste qui a répondu, avec filtres par jour, catégorie, sondage et
   consentement, recherche, classement, répartition par formation et exports CSV (pour Excel).
-  L'onglet **Apparence** lie le site à la palette et aux polices de Flexfolio, ou l'en délie.
 - `/staff` (compte staff ou admin) : scanner le QR code d'une récompense, voir à qui elle appartient
   et valider la remise. Un code ne sert qu'une fois. Les sondages réservés au staff et ouverts s'y
   affichent aussi, avec la réponse de chaque compte.
@@ -47,8 +46,8 @@ applique ces règles, pas seulement l'appli. Les jetons restent dans des cookies
 
 Côté navigateur, `src/proxy.ts` pose une Content-Security-Policy avec un nonce différent à chaque
 requête : seuls les scripts de l'appli s'exécutent (pas de script inline ni de CDN). Les styles inline
-restent autorisés, car React écrit des attributs `style` au rendu serveur ; les polices peuvent venir de
-Google Fonts pour l'apparence Flexfolio. Les autres en-têtes (nosniff, noindex, caméra) sont dans
+restent autorisés, car React écrit des attributs `style` au rendu serveur ; feuilles de style et polices
+ne viennent que du site lui-même. Les autres en-têtes (nosniff, noindex, caméra) sont dans
 `next.config.ts`.
 
 ## Mise en place
@@ -66,6 +65,12 @@ Google Fonts pour l'apparence Flexfolio. Les autres en-têtes (nosniff, noindex,
 3. Comptes de l'équipe : depuis flexstaff, `npm run role -- prenom.nom@exemple.fr flexform staff`
    (`admin` pour un admin, `remove` pour retirer l'accès).
 4. Redéployer.
+
+Fin du lien d'apparence avec Flexfolio : déployer d'abord cette version de Flexform, puis appliquer la
+migration flexstaff `20261005130000_flexform_drop_flexfolio_link.sql`, qui supprime la colonne
+`sondage_settings.theme_linked`. L'ancienne version lit cette colonne à chaque chargement des sondages
+et tomberait en erreur si elle disparaissait avant. Les variables `FLEXFOLIO_SUPABASE_URL` et
+`FLEXFOLIO_SUPABASE_ANON_KEY` ne servent plus et peuvent être retirées de Vercel.
 
 ## Tester en local
 
@@ -99,7 +104,7 @@ autre base).
 | `src/app/` | Pages (`/`, `/admin`, `/staff`, `/confidentialite`), mise en page et `globals.css` |
 | `src/app/api/` | Route Handlers, un dossier par route (`/api/state`, `/api/vote`, `/api/admin/...`, `/api/auth/...`) |
 | `src/components/` | Composants React des pages (`vote/`, `admin/`, `staff/`) et composants partagés |
-| `src/lib/server/` | Logique serveur (jamais importée côté navigateur) : accès Supabase, sessions, sondages, apparence |
+| `src/lib/server/` | Logique serveur (jamais importée côté navigateur) : accès Supabase, sessions, sondages |
 | `src/lib/client/` | Outils des pages : appels API, interrogation régulière, mise en forme, téléchargements |
 | `src/lib/shared/` | Types et succès communs au serveur et aux pages |
 | `src/proxy.ts` | Content-Security-Policy avec nonce |
@@ -111,4 +116,3 @@ autre base).
 |---|---|
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Projet Supabase (les noms `NEXT_PUBLIC_*` de Flexfolio marchent aussi) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Clé serveur, pour les actions des votants et la gestion de l'équipe |
-| `FLEXFOLIO_SUPABASE_URL`, `FLEXFOLIO_SUPABASE_ANON_KEY` | Facultatif : lire l'apparence dans un autre projet que celui des sondages |

@@ -62,7 +62,6 @@ interface PollRow {
 
 interface SettingsRow {
   active_poll_id: string | null;
-  theme_linked: boolean;
 }
 
 interface ParticipantRow {
@@ -129,7 +128,7 @@ interface Meta {
 async function loadMeta(db: Db): Promise<Meta> {
   const [rows, settings] = await Promise.all([
     db.select<PollRow>("sondage_polls", "select=*&order=position.asc,created_at.asc"),
-    db.one<SettingsRow>("sondage_settings", "select=active_poll_id,theme_linked&id=eq.1"),
+    db.one<SettingsRow>("sondage_settings", "select=active_poll_id&id=eq.1"),
   ]);
   return { polls: rows.map(toPoll), activePollId: settings?.active_poll_id ?? null };
 }

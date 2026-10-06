@@ -68,7 +68,7 @@ async function token(email, password) {
 await rest(SERVICE, "sondage_participants?id=not.is.null", { method: "DELETE" });
 await rest(SERVICE, "sondage_polls?staff_only=eq.true", { method: "DELETE" });
 await rest(SERVICE, "sondage_polls?id=not.is.null", { method: "PATCH", body: { status: "draft", hub: false, reward: "", reveal: false, published_at: null } });
-await rest(SERVICE, "sondage_settings?id=eq.1", { method: "PATCH", body: { active_poll_id: null, theme_linked: true } });
+await rest(SERVICE, "sondage_settings?id=eq.1", { method: "PATCH", body: { active_poll_id: null } });
 await rest(SERVICE, "sondage_rate_limits?key=not.is.null", { method: "DELETE" });
 
 console.log("\n# Votants");
