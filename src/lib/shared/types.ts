@@ -117,26 +117,6 @@ export interface Consent {
   updatedAt: number;
 }
 
-/** Palette et polices lues dans la table site_settings de Flexfolio */
-export interface FlexfolioTheme {
-  bg: string;
-  ink: string;
-  card: string;
-  accent: string;
-  fontTitle: string | null;
-  fontBody: string | null;
-}
-
-/** Réglage d'apparence, dans l'onglet Apparence de l'admin */
-export interface ThemeState {
-  /** Variables FLEXFOLIO_SUPABASE_URL et FLEXFOLIO_SUPABASE_ANON_KEY définies */
-  configured: boolean;
-  /** false : le site est délié et garde le thème du BDE */
-  linked: boolean;
-  theme: FlexfolioTheme | null;
-  error?: string;
-}
-
 /** Ce que le votant peut consulter et télécharger dans « Mes données » */
 export interface MyData {
   profile: Profile;

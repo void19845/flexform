@@ -4,7 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
  * Content-Security-Policy des pages, avec un nonce différent à chaque requête : Next.js l'ajoute
  * à ses propres scripts, et aucun autre script ne peut s'exécuter (pas de script inline, pas de CDN).
  * Styles : 'unsafe-inline' car React écrit des attributs style côté serveur (largeur des barres de
- * résultats) et un nonce ne couvre pas les attributs. Polices : Google Fonts, pour l'apparence Flexfolio.
+ * résultats) et un nonce ne couvre pas les attributs.
  */
 export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
@@ -13,8 +13,8 @@ export function proxy(request: NextRequest) {
     "default-src 'self'",
     // En développement, React a besoin d'eval pour ses messages d'erreur, et le rechargement à chaud passe par une websocket
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self'",
     "img-src 'self' data: blob:",
     `connect-src 'self'${isDev ? " ws:" : ""}`,
     "object-src 'none'",
@@ -34,7 +34,7 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     {
-      // Pages uniquement : les routes /api renvoient du JSON, du CSS ou des SVG, sans script
+      // Pages uniquement : les routes /api renvoient du JSON ou des SVG, sans script
       source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },

@@ -17,12 +17,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   await connection();
   return (
     <html lang="fr">
-      <head>
-        {/* Apparence liée à Flexfolio (palette, polices) ; vide quand le site est délié.
-            Feuille générée à chaque requête par /api/theme : elle ne peut pas être importée comme globals.css. */}
-        {/* eslint-disable-next-line @next/next/no-css-tags */}
-        <link rel="stylesheet" href="/api/theme" />
-      </head>
       <body>{children}</body>
     </html>
   );
