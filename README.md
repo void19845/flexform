@@ -27,9 +27,9 @@ celle du BDE (variables CSS de `src/app/globals.css`), indépendante de Flexfoli
 
 ## Données et sécurité
 
-Tables `sondage_*` dans le schéma public du projet Supabase partagé de Flex Suite. Le SQL (tables, règles,
-migrations) est dans le dépôt **flexstaff**, dossier `supabase/migrations/`. La sécurité par ligne (RLS)
-est activée sur toutes :
+Tables `sondage_*` dans le schéma public du projet Supabase partagé de Flex Suite. Leur SQL (tables, règles)
+est dans `supabase/init.sql`, fichier unique et idempotent, qui s'applique après celui du dépôt
+**flexstaff** (droits de la suite). La sécurité par ligne (RLS) est activée sur toutes :
 
 | Qui | Accès |
 |---|---|
@@ -52,7 +52,9 @@ ne viennent que du site lui-même. Les autres en-têtes (nosniff, noindex, camé
 
 ## Mise en place
 
-1. Base : appliquer les migrations du dépôt **flexstaff** (voir son README), qui créent aussi les rôles.
+1. Base : dans le SQL Editor de Supabase, exécuter `supabase/init.sql` du dépôt **flexstaff** (droits de la
+   suite, voir son README), puis `supabase/init.sql` de ce dépôt. Relancer ce dernier après chaque
+   modification du schéma : il est idempotent.
 2. Dans Vercel, importer le dépôt avec le preset **Next.js** (détecté automatiquement), Node.js 22.x,
    puis **Settings → Environment Variables** :
 
@@ -66,10 +68,9 @@ ne viennent que du site lui-même. Les autres en-têtes (nosniff, noindex, camé
    (`admin` pour un admin, `remove` pour retirer l'accès).
 4. Redéployer.
 
-Fin du lien d'apparence avec Flexfolio : déployer d'abord cette version de Flexform, puis appliquer la
-migration flexstaff `20261005130000_flexform_drop_flexfolio_link.sql`, qui supprime la colonne
-`sondage_settings.theme_linked`. L'ancienne version lit cette colonne à chaque chargement des sondages
-et tomberait en erreur si elle disparaissait avant. Les variables `FLEXFOLIO_SUPABASE_URL` et
+Fin du lien d'apparence avec Flexfolio : `supabase/init.sql` supprime la colonne
+`sondage_settings.theme_linked`, que les versions de Flexform d'avant ce changement lisent à chaque
+chargement des sondages : déployer Flexform avant d'appliquer `init.sql`. Les variables `FLEXFOLIO_SUPABASE_URL` et
 `FLEXFOLIO_SUPABASE_ANON_KEY` ne servent plus et peuvent être retirées de Vercel.
 
 ## Tester en local
