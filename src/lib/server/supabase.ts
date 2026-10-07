@@ -10,6 +10,7 @@ import { HttpError } from "./errors";
  *                   serveur vérifie lui-même (session par cookie).
  *   userDb(jeton)   jeton du compte admin ou staff connecté : la RLS de la base décide de ce
  *                   qu'il peut lire ou modifier (voir supabase/init.sql).
+ *   anonDb()        clé anon : lecture des thèmes publics de Flexdesign.
  */
 
 export interface SupabaseConfig {
@@ -133,6 +134,12 @@ export class Db {
 export function serviceDb(): Db {
   const cfg = supabaseConfig();
   return new Db(cfg.url, cfg.serviceKey, cfg.serviceKey);
+}
+
+/** Clé anon seule : uniquement ce que la base rend public (thèmes de Flexdesign). */
+export function anonDb(): Db {
+  const cfg = supabaseConfig();
+  return new Db(cfg.url, cfg.anonKey, cfg.anonKey);
 }
 
 export function userDb(accessToken: string): Db {
