@@ -17,6 +17,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   await connection();
   return (
     <html lang="fr">
+      <head>
+        {/* Apparence liée à un thème Flexdesign (couleurs, polices) ; vide quand le site garde le thème du BDE.
+            Feuille générée à la demande par /api/theme : elle ne peut pas être importée comme globals.css. */}
+        {/* eslint-disable-next-line @next/next/no-css-tags */}
+        <link rel="stylesheet" href="/api/theme" />
+      </head>
       <body>{children}</body>
     </html>
   );

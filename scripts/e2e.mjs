@@ -68,7 +68,7 @@ async function token(email, password) {
 await rest(SERVICE, "sondage_participants?id=not.is.null", { method: "DELETE" });
 await rest(SERVICE, "sondage_polls?staff_only=eq.true", { method: "DELETE" });
 await rest(SERVICE, "sondage_polls?id=not.is.null", { method: "PATCH", body: { status: "draft", hub: false, reward: "", reveal: false, published_at: null } });
-await rest(SERVICE, "sondage_settings?id=eq.1", { method: "PATCH", body: { active_poll_id: null } });
+await rest(SERVICE, "sondage_settings?id=eq.1", { method: "PATCH", body: { active_poll_id: null, design_theme_id: null } });
 await rest(SERVICE, "sondage_rate_limits?key=not.is.null", { method: "DELETE" });
 
 console.log("\n# Votants");
@@ -178,6 +178,44 @@ const own = await rest(staffJwt, "app_roles?select=role&app=eq.flexform");
 check("le staff lit seulement sa propre ligne d'équipe", own.data.length === 1 && own.data[0].role === "staff");
 check("l'admin lit tous les votes", (await rest(adminJwt, "sondage_votes?select=*")).data.length === 3);
 check("l'admin lit toute l'équipe Flexform", (await rest(adminJwt, "app_roles?select=role&app=eq.flexform")).data.length >= 2);
+
+console.log("\n# Apparence (thème Flexdesign)");
+// Thème de test créé directement dans les tables de Flexdesign (supabase/init.sql du dépôt flexdesign, appliqué par db:setup)
+await rest(SERVICE, "design_themes?name=eq.e2e-flexform", { method: "DELETE" });
+await rest(SERVICE, "design_fonts?family=eq.Flexdesign%20e2eflexform", { method: "DELETE" });
+const themeId = (await rest(SERVICE, "design_themes", { method: "POST", body: { name: "e2e-flexform" }, prefer: "return=representation" })).data[0].id;
+const roles = { background: "#fafaf5", surface: "#ffffff", text: "#111111", muted: "#555555", border: "#dddddd", primary: "#0b6e4f", onPrimary: "#ffffff", accent: "#e4572e", onAccent: "#ffffff", success: "#2e7d32", warning: "#f2a900", danger: "#c62828" };
+await rest(SERVICE, "design_theme_colors", { method: "POST", body: Object.entries(roles).map(([name, hex]) => ({ theme_id: themeId, mode: "light", kind: "role", name, hex })) });
+const fontRow = (await rest(SERVICE, "design_fonts", { method: "POST", body: { family: "Flexdesign e2eflexform", label: "Police e2e", source: "upload", category: "sans-serif", license: "own" }, prefer: "return=representation" })).data[0];
+await rest(SERVICE, "design_font_files", { method: "POST", body: { font_id: fontRow.id, weight: 400, style: "normal", format: "woff2", path: `${fontRow.id}/e2e-regular.woff2` } });
+await rest(SERVICE, "design_theme_fonts", { method: "POST", body: { theme_id: themeId, role: "body", font_id: fontRow.id, fallback: "sans-serif" } });
+
+check("sans lien : thème du BDE", !(await lea("/api/theme")).data.includes(":root"));
+check("le votant n'accède pas à l'apparence", (await lea("/api/admin/theme")).status === 401 && (await lea("/api/admin/theme", { method: "POST", body: { themeId } })).status === 401);
+check("le staff ne peut pas lier un thème", (await staff("/api/admin/theme", { method: "POST", body: { themeId } })).status === 403);
+const themes0 = await admin("/api/admin/theme");
+check("l'admin voit les thèmes de Flexdesign", themes0.data.themeId === null && themes0.data.themes?.some((t) => t.id === themeId), JSON.stringify(themes0.data).slice(0, 200));
+check("identifiant de thème invalide refusé", (await admin("/api/admin/theme", { method: "POST", body: { themeId: "x" } })).status === 400);
+check("thème inconnu refusé", (await admin("/api/admin/theme", { method: "POST", body: { themeId: "00000000-0000-0000-0000-000000000000" } })).status === 404);
+const linked = await admin("/api/admin/theme", { method: "POST", body: { themeId } });
+check("l'admin lie un thème", linked.status === 200 && linked.data.themeId === themeId && linked.data.theme?.colors.primary === "#0b6e4f" && linked.data.theme.fontBody === "Flexdesign e2eflexform", JSON.stringify(linked.data).slice(0, 300));
+const css = (await lea("/api/theme")).data;
+check("feuille du thème : couleurs", css.includes("--violet: #0b6e4f;") && css.includes("--bg: #fafaf5;") && css.includes("--on-violet: #ffffff;"), css.slice(0, 300));
+check("feuille du thème : police du bucket design-fonts", css.includes('font-family: "Flexdesign e2eflexform";') && css.includes(`${SB}/storage/v1/object/public/design-fonts/${fontRow.id}/e2e-regular.woff2`) && css.includes('--font-body: "Flexdesign e2eflexform", sans-serif;'), css.slice(0, 400));
+const csp = (await fetch(`${APP}/`)).headers.get("content-security-policy") ?? "";
+check("CSP : polices autorisées depuis Supabase", csp.includes(`font-src 'self' ${new URL(SB).origin}`), csp);
+const staffTheme = await rest(staffJwt, "sondage_settings?id=eq.1", { method: "PATCH", body: { design_theme_id: null }, prefer: "return=representation" });
+check("le staff ne modifie pas le thème lié en base", staffTheme.status >= 400 || staffTheme.data.length === 0, JSON.stringify(staffTheme));
+check("le thème lié reste en place", (await rest(SERVICE, "sondage_settings?select=design_theme_id&id=eq.1")).data[0]?.design_theme_id === themeId);
+check("l'admin délie le site", (await admin("/api/admin/theme", { method: "POST", body: { themeId: null } })).data.themeId === null && !(await lea("/api/theme")).data.includes(":root"));
+// Thème supprimé dans Flexdesign alors qu'il est encore lié : retour au thème du BDE
+await rest(SERVICE, "sondage_settings?id=eq.1", { method: "PATCH", body: { design_theme_id: themeId } });
+await rest(SERVICE, `design_themes?id=eq.${themeId}`, { method: "DELETE" });
+await rest(SERVICE, `design_fonts?id=eq.${fontRow.id}`, { method: "DELETE" });
+check("thème supprimé : thème du BDE", !(await lea("/api/theme")).data.includes(":root"));
+const gone = await admin("/api/admin/theme");
+check("thème supprimé : signalé à l'admin", gone.data.themeId === themeId && gone.data.theme === null, JSON.stringify(gone.data).slice(0, 200));
+await rest(SERVICE, "sondage_settings?id=eq.1", { method: "PATCH", body: { design_theme_id: null } });
 
 console.log("\n# RGPD et remise à zéro");
 check("remise à zéro : codes annulés", (await admin("/api/admin/action", { method: "POST", body: { id: "ag-roles", action: "reset" } })).status === 200 &&

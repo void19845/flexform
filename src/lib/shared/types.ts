@@ -117,6 +117,25 @@ export interface Consent {
   updatedAt: number;
 }
 
+/** Aperçu d'un thème Flexdesign : couleurs du mode clair (rôle -> #rrggbb) et polices */
+export interface DesignThemePreview {
+  name: string;
+  colors: Record<string, string>;
+  fontTitle: string | null;
+  fontBody: string | null;
+}
+
+/** Réglage d'apparence, dans l'onglet Apparence de l'admin */
+export interface ThemeState {
+  /** Thème lié ; null : le site garde le thème du BDE */
+  themeId: string | null;
+  /** Thèmes proposés par Flexdesign (vide si Flexdesign est absent ou injoignable) */
+  themes: { id: string; name: string }[];
+  /** Thème lié, lu dans Flexdesign ; null s'il est introuvable */
+  theme: DesignThemePreview | null;
+  error?: string;
+}
+
 /** Ce que le votant peut consulter et télécharger dans « Mes données » */
 export interface MyData {
   profile: Profile;

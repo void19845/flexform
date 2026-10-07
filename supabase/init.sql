@@ -60,6 +60,9 @@ create table if not exists public.sondage_settings (
 );
 -- Ancien lien d'apparence avec Flexfolio, retiré : Flexform garde son propre thème
 alter table public.sondage_settings drop column if exists theme_linked;
+-- Thème Flexdesign lié (réglage d'admin, vide = thème du BDE). Pas de clé étrangère : Flexdesign est
+-- facultatif, et un thème supprimé ou introuvable ramène simplement le thème du BDE.
+alter table public.sondage_settings add column if not exists design_theme_id uuid;
 insert into public.sondage_settings (id) values (1) on conflict (id) do nothing;
 
 -- Votants. L'id sert aussi de jeton de session (cookie HttpOnly).

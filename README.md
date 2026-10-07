@@ -4,7 +4,8 @@ Application de sondages du BDE Montreuil (« Sondages AG · BDE Montreuil » cô
 Next.js 16 (App Router, React 19, TypeScript), hébergeable sur Vercel, avec les données dans Supabase.
 Fait partie de **Flex Suite** avec
 le portfolio [Flexfolio](https://github.com/void19845/flexfolio) : même projet Supabase. L'apparence est
-celle du BDE (variables CSS de `src/app/globals.css`), indépendante de Flexfolio.
+celle du BDE (variables CSS de `src/app/globals.css`), sauf si l'admin lie un thème
+[Flexdesign](https://github.com/void19845/flexdesign) (onglet **Apparence**, désactivé par défaut).
 
 - `/` : les participants entrent prénom, nom, formation et pseudo, et donnent leur consentement RGPD
   (politique obligatoire, communication et sponsors facultatifs). Le sondage lancé en direct apparaît
@@ -20,6 +21,8 @@ celle du BDE (variables CSS de `src/app/globals.css`), indépendante de Flexfoli
   (bouton « Ouvrir au staff »). Il ne se lance pas en direct et n'a pas de récompense.
   L'onglet **Répondants & export** liste qui a répondu, avec filtres par jour, catégorie, sondage et
   consentement, recherche, classement, répartition par formation et exports CSV (pour Excel).
+  L'onglet **Apparence** lie le site à un thème Flexdesign (couleurs du mode clair, polices des titres et
+  du texte) ou le ramène au thème du BDE.
 - `/staff` (compte staff ou admin) : scanner le QR code d'une récompense, voir à qui elle appartient
   et valider la remise. Un code ne sert qu'une fois. Les sondages réservés au staff et ouverts s'y
   affichent aussi, avec la réponse de chaque compte.
@@ -46,9 +49,22 @@ applique ces règles, pas seulement l'appli. Les jetons restent dans des cookies
 
 Côté navigateur, `src/proxy.ts` pose une Content-Security-Policy avec un nonce différent à chaque
 requête : seuls les scripts de l'appli s'exécutent (pas de script inline ni de CDN). Les styles inline
-restent autorisés, car React écrit des attributs `style` au rendu serveur ; feuilles de style et polices
-ne viennent que du site lui-même. Les autres en-têtes (nosniff, noindex, caméra) sont dans
-`next.config.ts`.
+restent autorisés, car React écrit des attributs `style` au rendu serveur ; les feuilles de style ne
+viennent que du site lui-même, les polices du site et du bucket public `design-fonts` de Supabase (thème
+Flexdesign). Les autres en-têtes (nosniff, noindex, caméra) sont dans `next.config.ts`.
+
+### Thème Flexdesign
+
+Réglage `sondage_settings.design_theme_id` (vide par défaut), modifiable par l'admin seulement, avec son
+propre jeton (RLS). Toutes les pages chargent `/api/theme`, une feuille de style générée par le serveur : vide
+sans thème lié, sinon les couleurs du thème (rôles `background`, `surface`, `text`, `muted`, `border`,
+`primary`, `onPrimary`, `accent`, `onAccent`, `success`, `warning`, `danger` du mode clair, posés sur les
+variables de `globals.css`) et les polices de titre et de texte (`@font-face` vers le bucket `design-fonts`).
+Le thème est lu avec la clé anon dans les tables `design_*` de Flexdesign, qui sont publiques en lecture ;
+Flexform n'y écrit jamais. Chaque couleur, nom de police et chemin de fichier est revérifié avant d'entrer
+dans le CSS. Le thème est gardé une minute en mémoire : un changement dans Flexdesign s'applique en une
+minute environ. Sans Flexdesign, avec un thème supprimé ou si Supabase ne répond pas, le site garde le thème
+du BDE (ou le dernier thème connu).
 
 ## Mise en place
 
@@ -67,6 +83,10 @@ ne viennent que du site lui-même. Les autres en-têtes (nosniff, noindex, camé
 3. Comptes de l'équipe : depuis flexstaff, `npm run role -- prenom.nom@exemple.fr flexform staff`
    (`admin` pour un admin, `remove` pour retirer l'accès).
 4. Redéployer.
+
+Lien vers un thème Flexdesign : appliquer `supabase/init.sql` (colonne `sondage_settings.design_theme_id`)
+avant de déployer cette version. Les thèmes viennent du `supabase/init.sql` de **flexdesign** ; sans lui,
+l'onglet Apparence indique que Flexdesign n'est pas installé et le site garde le thème du BDE.
 
 Fin du lien d'apparence avec Flexfolio : `supabase/init.sql` supprime la colonne
 `sondage_settings.theme_linked`, que les versions de Flexform d'avant ce changement lisent à chaque
@@ -96,7 +116,8 @@ node --env-file=.env scripts/e2e.mjs http://localhost:8787
 ```
 
 `scripts/e2e.mjs` teste les parcours et la RLS contre la base locale (il refuse de tourner sur une
-autre base).
+autre base). La partie Apparence crée puis supprime un thème de test dans les tables de Flexdesign : le
+`supabase/init.sql` de flexdesign doit être appliqué à la base locale.
 
 ## Structure
 
@@ -105,10 +126,10 @@ autre base).
 | `src/app/` | Pages (`/`, `/admin`, `/staff`, `/confidentialite`), mise en page et `globals.css` |
 | `src/app/api/` | Route Handlers, un dossier par route (`/api/state`, `/api/vote`, `/api/admin/...`, `/api/auth/...`) |
 | `src/components/` | Composants React des pages (`vote/`, `admin/`, `staff/`) et composants partagés |
-| `src/lib/server/` | Logique serveur (jamais importée côté navigateur) : accès Supabase, sessions, sondages |
+| `src/lib/server/` | Logique serveur (jamais importée côté navigateur) : accès Supabase, sessions, sondages, thème Flexdesign |
 | `src/lib/client/` | Outils des pages : appels API, interrogation régulière, mise en forme, téléchargements |
 | `src/lib/shared/` | Types et succès communs au serveur et aux pages |
-| `src/proxy.ts` | Content-Security-Policy avec nonce |
+| `src/proxy.ts` | Content-Security-Policy avec nonce (polices : hôte Supabase de `SUPABASE_URL`) |
 | `scripts/` | Test de bout en bout |
 
 ## Variables d'environnement

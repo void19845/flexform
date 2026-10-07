@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AppearanceTab } from "@/components/admin/appearance-tab";
 import { CreatePollForm } from "@/components/admin/create-poll-form";
 import { JoinCard } from "@/components/admin/join-card";
 import { LiveBar } from "@/components/admin/live-bar";
@@ -18,6 +19,7 @@ export type Run = (action: () => Promise<unknown>) => void;
 const TABS = [
   { id: "polls", label: "Sondages" },
   { id: "respondents", label: "Répondants & export" },
+  { id: "appearance", label: "Apparence" },
 ] as const;
 
 type Tab = (typeof TABS)[number]["id"];
@@ -120,6 +122,7 @@ export function AdminPanel({
         </div>
       </div>
       <RespondentsTab active={tab === "respondents" && !stopped} onUnauthorized={() => signOut("Session expirée, reconnecte-toi.")} />
+      <AppearanceTab active={tab === "appearance"} />
       <p className="toast" role="status" hidden={!toast}>
         {toast?.text}
       </p>
