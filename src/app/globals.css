@@ -360,25 +360,6 @@ a.btn { text-decoration: none; }
 .reward-hint { margin: -8px 0 14px; padding: 8px 12px; border-radius: 12px; background: #FFF4D6; color: #7A5A00; font-size: 0.9rem; font-weight: 600; }
 .reward-hint.won { background: #E3F7EE; color: var(--ok); }
 
-/* --- Page staff --- */
-
-.page-staff { max-width: 560px; margin: 0 auto; padding: 16px 16px 48px; display: grid; gap: 16px; }
-.page-staff .topbar { margin-bottom: 0; }
-.scanner { display: grid; gap: 12px; }
-.video-box video { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 12px; background: #000; }
-.manual { display: flex; gap: 8px; }
-.manual input { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; text-transform: uppercase; letter-spacing: 0.06em; }
-.scan-result:empty { display: none; }
-.result { display: grid; gap: 10px; border-left: 8px solid var(--line); }
-.result h2 { margin: 0; font-size: 1.4rem; }
-.result p { margin: 0; }
-.result.valid { border-left-color: var(--ok); }
-.result.done { border-left-color: var(--ok); background: #E3F7EE; }
-.result.used { border-left-color: var(--yellow); background: #FFF8E6; }
-.result.invalid { border-left-color: var(--danger); background: #FFEFF3; }
-.result .person { display: grid; font-size: 1.05rem; }
-.result .code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
-
 /* --- Succès --- */
 
 .achievement-grid { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }

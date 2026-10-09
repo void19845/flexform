@@ -8,13 +8,11 @@ import type { Account } from "@/lib/client/account";
 export function AccountLoginForm({
   eyebrow,
   title,
-  intro,
   message = "",
   onSignedIn,
 }: {
   eyebrow: string;
   title: string;
-  intro?: string;
   message?: string;
   onSignedIn: (account: Account) => void;
 }) {
@@ -44,7 +42,6 @@ export function AccountLoginForm({
     <form className="card login" onSubmit={submit}>
       <p className="eyebrow">{eyebrow}</p>
       <h1>{title}</h1>
-      {intro && <p className="muted">{intro}</p>}
       <label className="field">
         <span>E-mail</span>
         <input name="email" type="email" placeholder="prenom.nom@exemple.fr" autoComplete="username" required autoFocus />

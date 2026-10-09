@@ -17,16 +17,18 @@ celle du BDE (variables CSS de `src/app/globals.css`), sauf si l'admin lie un th
 - `/admin` (compte admin) : lancer, clôturer et afficher les résultats des sondages. Chaque sondage peut
   être mis dans le hub, rangé dans une catégorie et doté d'une récompense (ex. « 1 café offert »).
   Un sondage **réservé au staff** (case à cocher à la création) n'est jamais montré aux votants et ne compte
-  ni dans le classement ni dans les succès : le staff y répond depuis `/staff` tant qu'il est ouvert
-  (bouton « Ouvrir au staff »). Il ne se lance pas en direct et n'a pas de récompense.
+  ni dans le classement ni dans les succès : le staff y répond depuis la page `/staff` de **Flexstaff**
+  tant qu'il est ouvert (bouton « Ouvrir au staff »). Il ne se lance pas en direct et n'a pas de récompense.
   L'onglet **Répondants & export** liste qui a répondu, avec filtres par jour, catégorie, sondage et
   consentement, recherche, classement, répartition par formation et exports CSV (pour Excel).
   L'onglet **Apparence** lie le site à un thème Flexdesign (couleurs du mode clair, polices des titres et
   du texte) ou le ramène au thème du BDE.
-- `/staff` (compte staff ou admin) : scanner le QR code d'une récompense, voir à qui elle appartient
-  et valider la remise. Un code ne sert qu'une fois. Les sondages réservés au staff et ouverts s'y
-  affichent aussi, avec la réponse de chaque compte.
 - `/confidentialite` : politique de confidentialité (les passages entre crochets sont à compléter).
+
+La remise des récompenses (scan du QR code, qui contient le code seul, puis validation) et les réponses
+aux sondages réservés au staff se font dans **Flexstaff**, page `/staff`, avec un compte staff ou admin
+Flexform. Flexform n'a plus de page staff ; un compte staff peut toujours s'y connecter, mais n'a pas
+accès à l'administration.
 
 ## Données et sécurité
 
@@ -44,14 +46,14 @@ est dans `supabase/init.sql`, fichier unique et idempotent, qui s'applique aprè
 Les rôles viennent de la table commune `app_roles` (appli `flexform`) ; un super admin de la suite est
 admin partout. Voir le README de flexstaff.
 
-Les requêtes admin et staff arrivent à la base avec le jeton du compte connecté : c'est Postgres qui
-applique ces règles, pas seulement l'appli. Les jetons restent dans des cookies HttpOnly.
+Les requêtes admin (dans Flexform) et staff (depuis Flexstaff) arrivent à la base avec le jeton du compte
+connecté : c'est Postgres qui applique ces règles, pas seulement l'appli. Les jetons restent dans des cookies HttpOnly.
 
 Côté navigateur, `src/proxy.ts` pose une Content-Security-Policy avec un nonce différent à chaque
 requête : seuls les scripts de l'appli s'exécutent (pas de script inline ni de CDN). Les styles inline
 restent autorisés, car React écrit des attributs `style` au rendu serveur ; les feuilles de style ne
 viennent que du site lui-même, les polices du site et du bucket public `design-fonts` de Supabase (thème
-Flexdesign). Les autres en-têtes (nosniff, noindex, caméra) sont dans `next.config.ts`.
+Flexdesign). Les autres en-têtes (nosniff, noindex) sont dans `next.config.ts`.
 
 ### Thème Flexdesign
 
@@ -123,9 +125,9 @@ autre base). La partie Apparence crée puis supprime un thème de test dans les 
 
 | Dossier | Contenu |
 |---|---|
-| `src/app/` | Pages (`/`, `/admin`, `/staff`, `/confidentialite`), mise en page et `globals.css` |
+| `src/app/` | Pages (`/`, `/admin`, `/confidentialite`), mise en page et `globals.css` |
 | `src/app/api/` | Route Handlers, un dossier par route (`/api/state`, `/api/vote`, `/api/admin/...`, `/api/auth/...`) |
-| `src/components/` | Composants React des pages (`vote/`, `admin/`, `staff/`) et composants partagés |
+| `src/components/` | Composants React des pages (`vote/`, `admin/`) et composants partagés |
 | `src/lib/server/` | Logique serveur (jamais importée côté navigateur) : accès Supabase, sessions, sondages, thème Flexdesign |
 | `src/lib/client/` | Outils des pages : appels API, interrogation régulière, mise en forme, téléchargements |
 | `src/lib/shared/` | Types et succès communs au serveur et aux pages |

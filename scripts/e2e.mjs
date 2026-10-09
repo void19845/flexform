@@ -6,6 +6,8 @@
  *
  *   node --env-file=.env scripts/e2e.mjs [adresse de l'appli, défaut http://localhost:8787]
  */
+import QRCode from "qrcode";
+
 const APP = process.argv[2] ?? "http://localhost:8787";
 const { SUPABASE_URL: SB, SUPABASE_ANON_KEY: ANON, SUPABASE_SERVICE_ROLE_KEY: SERVICE } = process.env;
 if (!SB?.includes("127.0.0.1") && !SB?.includes("localhost")) {
@@ -64,6 +66,11 @@ async function token(email, password) {
   return (await res.json()).access_token;
 }
 
+/** Identifiant du compte (auth.users) contenu dans son jeton. */
+function uid(jwt) {
+  return JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString()).sub;
+}
+
 // Base propre : on retire les votants et les codes des tests précédents, et on remet les sondages en brouillon
 await rest(SERVICE, "sondage_participants?id=not.is.null", { method: "DELETE" });
 await rest(SERVICE, "sondage_polls?staff_only=eq.true", { method: "DELETE" });
@@ -92,6 +99,17 @@ check("connexion staff", staffLogin.status === 200 && staffLogin.data.role === "
 check("un votant n'accède pas à l'admin", (await lea("/api/admin/state")).status === 401);
 check("le staff n'accède pas à l'admin", (await staff("/api/admin/state")).status === 403);
 check("le staff ne peut pas lancer un sondage", (await staff("/api/admin/action", { method: "POST", body: { id: "ag-roles", action: "open" } })).status === 403);
+// La remise des récompenses et les sondages du staff passent par Flexstaff, qui agit sur la base avec le
+// jeton du compte connecté : on teste donc directement la base avec ces jetons.
+const staffJwt = await token(process.env.TEST_STAFF_EMAIL, process.env.TEST_STAFF_PASSWORD);
+const adminJwt = await token(process.env.TEST_ADMIN_EMAIL, process.env.TEST_ADMIN_PASSWORD);
+
+console.log("\n# Partie staff déplacée dans Flexstaff");
+for (const path of ["/api/staff/check", "/api/staff/redeem", "/api/staff/vote"]) {
+  check(`${path} n'existe plus (404)`, (await staff(path, { method: "POST", body: { code: "ZZZZZZZZZZZZ" } })).status === 404);
+}
+check("/api/staff/polls n'existe plus (404)", (await staff("/api/staff/polls")).status === 404);
+check("la page /staff n'existe plus (404)", (await staff("/staff")).status === 404);
 
 console.log("\n# Sondages");
 const state0 = await admin("/api/admin/state");
@@ -108,7 +126,12 @@ const pub = await lea("/api/state");
 check("état votant : direct + hub + récompense", pub.data.poll?.id === "ag-vote-roles" && pub.data.poll.myVote === "1" && pub.data.hub.length === 1 && pub.data.rewards.length === 1, JSON.stringify(pub.data).slice(0, 300));
 const code = pub.data.rewards[0]?.code;
 check("même code au rafraîchissement", (await lea("/api/state")).data.rewards[0]?.code === code);
-check("QR servi au propriétaire seulement", (await lea(`/api/reward-qr?code=${code}`)).status === 200 && (await tom(`/api/reward-qr?code=${code}`)).status === 404);
+const qr = await lea(`/api/reward-qr?code=${code}`);
+check("QR servi au propriétaire seulement", qr.status === 200 && (await tom(`/api/reward-qr?code=${code}`)).status === 404);
+// Modules du QR (tracé de la couleur foncée), comparés à ceux d'un QR qui ne contient que le code
+const qrModules = (svg) => /stroke="[^"]*" d="([^"]+)"/.exec(svg)?.[1];
+const codeOnly = await QRCode.toString(code ?? "", { type: "svg", margin: 1, errorCorrectionLevel: "M" });
+check("QR de récompense : le code seul, sans adresse", qrModules(qr.data) !== undefined && qrModules(qr.data) === qrModules(codeOnly));
 const admin1 = await admin("/api/admin/state");
 const votePoll = admin1.data.polls.find((p) => p.id === "ag-vote-roles");
 check("résultats admin", votePoll.results.total === 2 && votePoll.results.counts["1"] === 1, JSON.stringify(votePoll.results));
@@ -118,15 +141,21 @@ check("classement + succès", board.data.me?.rank === 1 && board.data.achievemen
 const resp = await admin("/api/admin/respondents");
 check("répondants avec consentement", resp.data.respondents.find((r) => r.pseudo === "lea")?.consent?.sponsors === true);
 
-console.log("\n# Récompenses (staff)");
-const checked = await staff("/api/staff/check", { method: "POST", body: { code: `${APP}/staff?code=${code}` } });
-check("scan : valide, avec le nom", checked.data.status === "valid" && checked.data.person?.nom === "Martin", JSON.stringify(checked.data));
-const [a, b] = await Promise.all([
-  staff("/api/staff/redeem", { method: "POST", body: { code } }),
-  admin("/api/staff/redeem", { method: "POST", body: { code: code.toLowerCase().replace(/(.{4})/g, "$1-") } }),
-]);
-check("double validation simultanée : une seule réussit", [a.data.status, b.data.status].sort().join() === "done,used", `${a.data.status} ${b.data.status}`);
-check("code inconnu", (await staff("/api/staff/check", { method: "POST", body: { code: "ZZZZZZZZZZZZ" } })).data.status === "invalid");
+console.log("\n# Récompenses (remise depuis Flexstaff, base avec le jeton du staff)");
+const checked = await rest(staffJwt, `sondage_reward_codes?select=redeemed_at,poll:sondage_polls(question,reward),participant:sondage_participants(prenom,nom,formation)&code=eq.${code}`);
+const row = checked.data?.[0];
+check("le staff lit le code : récompense et nom", row?.redeemed_at === null && row.poll?.reward === "1 café offert" && row.participant?.nom === "Martin", JSON.stringify(checked.data));
+check("code inconnu : aucune ligne", (await rest(staffJwt, "sondage_reward_codes?select=code&code=eq.ZZZZZZZZZZZZ")).data?.length === 0);
+// Validation : seuls les codes pas encore remis sont mis à jour
+const redeem = (jwt) =>
+  rest(jwt, `sondage_reward_codes?code=eq.${code}&redeemed_at=is.null`, {
+    method: "PATCH",
+    body: { redeemed_at: new Date().toISOString(), redeemed_by: uid(jwt) },
+    prefer: "return=representation",
+  });
+const [a, b] = await Promise.all([redeem(staffJwt), redeem(adminJwt)]);
+check("double validation simultanée : une seule réussit", a.status === 200 && b.status === 200 && a.data.length + b.data.length === 1, `${a.status} ${JSON.stringify(a.data)} / ${b.status} ${JSON.stringify(b.data)}`);
+check("code déjà remis : nouvelle validation sans effet", (await redeem(staffJwt)).data?.length === 0);
 check("succès « Chasseur de récompenses »", (await lea("/api/leaderboard")).data.achievements.find((x) => x.id === "collector")?.unlocked === true);
 
 console.log("\n# Sondages réservés au staff");
@@ -137,27 +166,38 @@ const staffPollId = (await admin("/api/admin/state")).data.polls.find((p) => p.s
 const leaState = (await lea("/api/state")).data;
 check("le votant ne voit pas le sondage staff", staffPollId && leaState.poll?.id !== staffPollId && !leaState.hub.some((p) => p.id === staffPollId), JSON.stringify(leaState.hub));
 check("le votant ne peut pas répondre au sondage staff", (await lea("/api/vote", { method: "POST", body: { pollId: staffPollId, value: "0" } })).status === 404);
-check("le votant n'accède pas aux sondages staff", (await lea("/api/staff/polls")).status === 401 && (await lea("/api/staff/vote", { method: "POST", body: { pollId: staffPollId, value: "0" } })).status === 401);
 check("lancer en direct refusé pour un sondage staff", (await admin("/api/admin/action", { method: "POST", body: { id: staffPollId, action: "open" } })).status === 409);
 check("le sondage staff ne compte pas dans le classement", (await lea("/api/leaderboard")).data.totalPolls === 6);
-check("le staff voit le sondage staff", (await staff("/api/staff/polls")).data.some?.((p) => p.id === staffPollId && p.myVote === null));
-check("le staff répond", (await staff("/api/staff/vote", { method: "POST", body: { pollId: staffPollId, value: "1" } })).status === 200);
-check("l'admin répond aussi depuis /staff", (await admin("/api/staff/vote", { method: "POST", body: { pollId: staffPollId, value: "0" } })).status === 200);
-check("le staff retrouve sa réponse", (await staff("/api/staff/polls")).data.find?.((p) => p.id === staffPollId)?.myVote === "1");
-check("choix invalide refusé au staff", (await staff("/api/staff/vote", { method: "POST", body: { pollId: staffPollId, value: "9" } })).status === 400);
-check("le staff ne peut pas répondre à un sondage normal par /staff", (await staff("/api/staff/vote", { method: "POST", body: { pollId: "ag-roles", value: "0" } })).status === 404);
+// Réponse depuis Flexstaff : enregistrée ou remplacée avec le jeton du compte (userId : compte au nom duquel on répond)
+const staffVote = (jwt, pollId, value, userId = uid(jwt)) =>
+  rest(jwt, "sondage_staff_votes?on_conflict=poll_id,user_id", {
+    method: "POST",
+    body: { poll_id: pollId, user_id: userId, value },
+    prefer: "resolution=merge-duplicates,return=representation",
+  });
+check("le staff voit le sondage staff ouvert", (await rest(staffJwt, "sondage_polls?select=id&staff_only=eq.true&hub=eq.true")).data?.some((p) => p.id === staffPollId));
+const firstVote = await staffVote(staffJwt, staffPollId, "0");
+check("le staff répond en son nom", firstVote.status === 201, `${firstVote.status} ${JSON.stringify(firstVote.data)}`);
+const changed = await staffVote(staffJwt, staffPollId, "1");
+check("le staff change sa réponse", changed.status === 200 && changed.data?.[0]?.value === "1", `${changed.status} ${JSON.stringify(changed.data)}`);
+check("l'admin répond aussi en son nom", (await staffVote(adminJwt, staffPollId, "0")).status === 201);
+const ownVotes = await rest(staffJwt, `sondage_staff_votes?select=user_id,value&poll_id=eq.${staffPollId}`);
+check("le staff ne lit que sa propre réponse", ownVotes.data?.length === 1 && ownVotes.data[0].value === "1", JSON.stringify(ownVotes.data));
+const forOther = await staffVote(staffJwt, staffPollId, "1", uid(adminJwt));
+check("le staff ne peut pas répondre au nom d'un autre compte", forOther.status >= 400, `${forOther.status}`);
+const onNormal = await staffVote(staffJwt, "ag-roles", "0");
+check("le staff ne peut pas répondre à un sondage qui n'est pas réservé au staff", onNormal.status >= 400, `${onNormal.status}`);
 const staffResults = (await admin("/api/admin/state")).data.polls.find((p) => p.id === staffPollId)?.results;
 check("résultats du sondage staff dans l'admin", staffResults?.total === 2 && staffResults.counts["1"] === 1, JSON.stringify(staffResults));
 check("aucune réponse du staff parmi les votes des votants", (await rest(SERVICE, `sondage_votes?select=poll_id&poll_id=eq.${staffPollId}`)).data.length === 0);
 await admin("/api/admin/action", { method: "POST", body: { id: staffPollId, action: "unhub" } });
-check("réponse du staff refusée une fois le sondage fermé", (await staff("/api/staff/vote", { method: "POST", body: { pollId: staffPollId, value: "0" } })).status === 409);
-check("sondage fermé absent de /staff", (await staff("/api/staff/polls")).data.length === 0);
+const whenClosed = await staffVote(staffJwt, staffPollId, "0");
+check("réponse du staff refusée une fois le sondage fermé", whenClosed.status >= 400, `${whenClosed.status}`);
+check("la réponse du staff reste celle d'avant la fermeture", (await rest(staffJwt, `sondage_staff_votes?select=value&poll_id=eq.${staffPollId}`)).data?.[0]?.value === "1");
 check("remise à zéro : réponses du staff effacées", (await admin("/api/admin/action", { method: "POST", body: { id: staffPollId, action: "reset" } })).status === 200 &&
   (await rest(SERVICE, `sondage_staff_votes?select=user_id&poll_id=eq.${staffPollId}`)).data.length === 0);
 
 console.log("\n# Sécurité par ligne (accès direct à la base)");
-const staffJwt = await token(process.env.TEST_STAFF_EMAIL, process.env.TEST_STAFF_PASSWORD);
-const adminJwt = await token(process.env.TEST_ADMIN_EMAIL, process.env.TEST_ADMIN_PASSWORD);
 for (const table of ["sondage_participants", "sondage_votes", "sondage_reward_codes", "sondage_polls", "sondage_settings", "sondage_staff_votes", "app_roles"]) {
   const r = await rest(ANON, `${table}?select=*`);
   check(`anon ne lit rien dans ${table}`, r.status === 401 || r.status === 403 || (Array.isArray(r.data) && r.data.length === 0), `${r.status} ${JSON.stringify(r.data).slice(0, 100)}`);
@@ -219,7 +259,7 @@ await rest(SERVICE, "sondage_settings?id=eq.1", { method: "PATCH", body: { desig
 
 console.log("\n# RGPD et remise à zéro");
 check("remise à zéro : codes annulés", (await admin("/api/admin/action", { method: "POST", body: { id: "ag-roles", action: "reset" } })).status === 200 &&
-  (await staff("/api/staff/check", { method: "POST", body: { code } })).data.status === "invalid");
+  (await rest(SERVICE, `sondage_reward_codes?select=code&code=eq.${code}`)).data?.length === 0);
 const mine = await tom("/api/privacy");
 check("Mes données", mine.status === 200 && mine.data.answers.length === 1 && mine.data.profile.pseudo === "tom");
 check("modifier ses consentements", (await tom("/api/privacy", { method: "POST", body: { marketing: true, sponsors: false } })).data.marketing === true);

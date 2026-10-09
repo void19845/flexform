@@ -26,7 +26,7 @@ export interface Poll {
   category?: string;
   /** Récompense gagnée en répondant (ex. « 1 café offert »), remise par le staff via un QR code */
   reward?: string;
-  /** Réservé au staff : jamais montré aux votants, répondu depuis /staff tant qu'il est dans le hub */
+  /** Réservé au staff : jamais montré aux votants, répondu depuis Flexstaff (/staff) tant qu'il est dans le hub */
   staffOnly?: boolean;
   createdAt: number;
   /** Première mise en ligne (lancé en direct ou mis dans le hub), pour le succès « Plus rapide que la lumière » */
@@ -73,20 +73,6 @@ export interface PublicState {
   hub: PublicPoll[];
   rewards: MyReward[];
   participants: number;
-}
-
-/**
- * Résultat d'un scan côté staff.
- * valid = à remettre, done = remise validée à l'instant, used = déjà remise, invalid = code inconnu ou annulé
- */
-export interface RewardCheck {
-  status: "valid" | "done" | "used" | "invalid";
-  code: string;
-  message?: string;
-  reward?: string;
-  question?: string;
-  person?: Profile;
-  redeemedAt?: number | null;
 }
 
 /** Identité saisie à la connexion, gardée après la déconnexion pour l'export des répondants. */
@@ -172,9 +158,6 @@ export interface RespondentsState {
   polls: Pick<Poll, "id" | "question" | "kind" | "options" | "category">[];
   respondents: Respondent[];
 }
-
-/** Sondage réservé au staff, tel que le voit un compte staff ou admin sur /staff, avec sa propre réponse */
-export type StaffPoll = Pick<PublicPoll, "id" | "kind" | "question" | "options" | "myVote">;
 
 export interface LeaderboardEntry {
   rank: number;

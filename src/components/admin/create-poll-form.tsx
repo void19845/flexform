@@ -67,7 +67,7 @@ export function CreatePollForm({ categories, run, flash }: { categories: string[
       <label className="check">
         <input type="checkbox" checked={draft.staffOnly} onChange={(e) => edit({ staffOnly: e.target.checked })} />
         <span>
-          Réservé au staff <em>(jamais montré aux votants ; le staff y répond depuis la page /staff)</em>
+          Réservé au staff <em>(jamais montré aux votants ; le staff y répond depuis Flexstaff, page /staff)</em>
         </span>
       </label>
       <label className="field" hidden={draft.staffOnly}>
