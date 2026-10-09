@@ -5,7 +5,8 @@ import { AccountLoginForm } from "@/components/account-login-form";
 import { AdminPanel } from "@/components/admin/admin-panel";
 import { currentAccount, type Account } from "@/lib/client/account";
 
-const STAFF_ONLY = "Ce compte a le rôle staff : il donne accès à la page staff, pas à l'administration.";
+const STAFF_ONLY =
+  "Ce compte a le rôle staff : il donne accès à la remise des récompenses et aux sondages du staff dans Flexstaff, pas à cette administration.";
 
 /**
  * loading : en attente de /api/auth/me ; login : connexion, avec un message éventuel ; panel : tableau de bord.

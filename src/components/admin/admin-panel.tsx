@@ -85,9 +85,6 @@ export function AdminPanel({
         </div>
         <div className="topbar-actions">
           <span className="muted small">{account.email}</span>
-          <a className="btn ghost small" href="/staff" target="_blank" rel="noopener">
-            Page staff
-          </a>
           <button type="button" className="btn ghost small" onClick={() => signOut()}>
             Déconnexion
           </button>

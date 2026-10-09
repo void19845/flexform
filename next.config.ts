@@ -19,13 +19,6 @@ const nextConfig: NextConfig = {
         source: "/admin",
         headers: [{ key: "X-Robots-Tag", value: "noindex" }],
       },
-      {
-        source: "/staff",
-        headers: [
-          { key: "X-Robots-Tag", value: "noindex" },
-          { key: "Permissions-Policy", value: "camera=(self)" },
-        ],
-      },
     ];
   },
 };

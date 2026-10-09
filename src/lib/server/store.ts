@@ -19,8 +19,6 @@ import {
   type PublicState,
   type Respondent,
   type RespondentsState,
-  type RewardCheck,
-  type StaffPoll,
 } from "@/lib/shared/types";
 import {
   ACHIEVEMENTS,
@@ -39,7 +37,7 @@ import { Db, DbError, eq, inList, serviceDb } from "./supabase";
  *   sondage_polls, sondage_settings, sondage_participants, sondage_votes, sondage_reward_codes,
  *   sondage_staff_votes (réponses du staff aux sondages qui lui sont réservés).
  * Les fonctions des votants utilisent serviceDb() : le serveur a vérifié leur session.
- * Les fonctions admin et staff reçoivent la connexion du compte connecté : la RLS s'applique.
+ * Les fonctions admin reçoivent la connexion du compte connecté : la RLS s'applique.
  */
 
 // --- Lignes de la base ----------------------------------------------------
@@ -322,15 +320,9 @@ function newCode(): string {
   return Array.from({ length: CODE_LENGTH }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join("");
 }
 
-/** Accepte le contenu du QR code (adresse de la page staff) ou le code tapé à la main, avec ou sans tirets. */
+/** Code tapé à la main ou lu dans la base, avec ou sans tirets. */
 export function normalizeCode(raw: string): string {
-  let text = raw.trim();
-  try {
-    text = new URL(text).searchParams.get("code") ?? "";
-  } catch {
-    // pas une adresse : c'est le code lui-même
-  }
-  return text.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 32);
+  return raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 32);
 }
 
 /**
@@ -361,76 +353,6 @@ async function myRewards(db: Db, meta: Meta, sessionId: string, mine: Map<string
 export async function rewardOwner(code: string): Promise<string | null> {
   const row = await serviceDb().one<{ participant_id: string }>("sondage_reward_codes", `select=participant_id&code=${eq(code)}`);
   return row?.participant_id ?? null;
-}
-
-interface CodeLookup {
-  code: string;
-  redeemed_at: string | null;
-  poll: { question: string; reward: string } | null;
-  participant: { pseudo: string; prenom: string; nom: string; formation: string } | null;
-}
-
-/** Ce que voit le staff après un scan (lu avec son propre jeton : la RLS s'applique). */
-export async function checkReward(db: Db, rawCode: string): Promise<RewardCheck> {
-  const code = normalizeCode(rawCode);
-  const row = code
-    ? await db.one<CodeLookup>(
-        "sondage_reward_codes",
-        `select=code,redeemed_at,poll:sondage_polls(question,reward),participant:sondage_participants(pseudo,prenom,nom,formation)&code=${eq(code)}`,
-      )
-    : null;
-  if (!row) return { status: "invalid", code, message: "Code inconnu, ou annulé (sondage remis à zéro ou supprimé)." };
-  const person = row.participant ? { ...row.participant } : undefined;
-  if (!row.poll?.reward) return { status: "invalid", code, person, message: "Code annulé : la récompense a été retirée de ce sondage." };
-  const base = { code, person, reward: row.poll.reward, question: row.poll.question };
-  if (row.redeemed_at) return { ...base, status: "used", redeemedAt: ms(row.redeemed_at) };
-  return { ...base, status: "valid", redeemedAt: null };
-}
-
-/**
- * Valide la remise. La mise à jour ne touche que les codes pas encore remis :
- * si deux membres du staff valident en même temps, un seul réussit.
- */
-export async function redeemReward(db: Db, userId: string, rawCode: string): Promise<RewardCheck> {
-  const check = await checkReward(db, rawCode);
-  if (check.status !== "valid") return check;
-  const at = nowIso();
-  const rows = await db.update("sondage_reward_codes", `code=${eq(check.code)}&redeemed_at=is.null`, {
-    redeemed_at: at,
-    redeemed_by: userId || null,
-  });
-  if (!rows.length) return checkReward(db, check.code);
-  return { ...check, status: "done", redeemedAt: Date.parse(at) };
-}
-
-// --- Staff : sondages réservés ---------------------------------------------
-
-/** Sondages réservés au staff et ouverts (dans le hub), avec la réponse du compte connecté. */
-export async function staffPolls(db: Db, userId: string): Promise<StaffPoll[]> {
-  const [rows, mine] = await Promise.all([
-    db.select<PollRow>("sondage_polls", "select=*&staff_only=eq.true&hub=eq.true&order=position.asc,created_at.asc"),
-    db.select<StaffVoteRow>("sondage_staff_votes", `select=poll_id,value&user_id=${eq(userId)}`),
-  ]);
-  return rows.map((r) => ({
-    id: r.id,
-    kind: r.kind,
-    question: r.question,
-    options: r.options,
-    myVote: mine.find((v) => v.poll_id === r.id)?.value ?? null,
-  }));
-}
-
-/** Enregistre ou remplace la réponse du compte connecté. La RLS refuse aussi tout autre sondage ou compte. */
-export async function staffVote(db: Db, userId: string, pollId: string, value: string): Promise<void> {
-  const poll = await db.one<PollRow>("sondage_polls", `select=*&id=${eq(pollId)}&staff_only=eq.true`);
-  if (!poll) throw new HttpError(404, "Sondage introuvable");
-  if (!poll.hub) throw new HttpError(409, "Le vote est clôturé");
-  checkAnswer(poll, value);
-  await db.insert(
-    "sondage_staff_votes",
-    { poll_id: pollId, user_id: userId, value, voted_at: nowIso() },
-    { onConflict: "poll_id,user_id", resolution: "merge" },
-  );
 }
 
 // --- Admin : lecture -------------------------------------------------------

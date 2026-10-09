@@ -47,7 +47,7 @@ create table if not exists public.sondage_polls (
 );
 
 -- Sondage réservé au staff : jamais montré aux votants. Le staff et les admins y répondent depuis la
--- page /staff, avec leur compte, tant qu'il est « dans le hub ». Pas de récompense : les codes de
+-- page /staff de Flexstaff, avec leur compte, tant qu'il est « dans le hub ». Pas de récompense : les codes de
 -- récompense appartiennent aux votants.
 alter table public.sondage_polls add column if not exists staff_only boolean not null default false;
 alter table public.sondage_polls drop constraint if exists sondage_polls_staff_no_reward;

@@ -25,20 +25,17 @@ export function WaitingCard({ hubBelow }: { hubBelow: boolean }) {
  * Carte d'un sondage : celui lancé en direct (live) ou un sondage du hub. À afficher avec key={poll.id} :
  * la carte est gardée d'un rafraîchissement à l'autre pour ne pas effacer une réponse en cours de saisie.
  * startedAt : heure de départ de la requête qui a lu ce sondage.
- * staff : sondage réservé au staff, répondu depuis /staff avec le compte connecté.
  */
 export function PollCard({
   poll,
   startedAt,
   live,
   onVoted,
-  staff = false,
 }: {
   poll: PublicPoll;
   startedAt: number;
   live: boolean;
   onVoted: () => void;
-  staff?: boolean;
 }) {
   /** Dernier vote envoyé et son heure : un état lu avant cette heure garde le vote local. */
   const [sent, setSent] = useState<{ value: string; at: number } | null>(null);
@@ -66,7 +63,7 @@ export function PollCard({
     const previous = sent;
     setSent({ value, at });
     try {
-      await post(staff ? "/api/staff/vote" : "/api/vote", { pollId: poll.id, value });
+      await post("/api/vote", { pollId: poll.id, value });
       onVoted();
     } catch (err) {
       // Vote refusé : on revient au vote affiché avant l'envoi
@@ -125,7 +122,7 @@ export function PollCard({
       {live ? (
         <p className={open ? "eyebrow live" : "eyebrow"}>{open ? "Sondage en cours" : "Sondage clôturé"}</p>
       ) : (
-        <p className="eyebrow">{staff ? "Réservé au staff" : "En libre accès"}</p>
+        <p className="eyebrow">En libre accès</p>
       )}
       <Question className="question">{poll.question}</Question>
       {poll.reward && (
